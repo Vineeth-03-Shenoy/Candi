@@ -2,25 +2,30 @@
 Strategist Agent - Determines interview rounds and preparation strategy
 """
 import os
+import re
 from openai import OpenAI
+
+from app.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class StrategistAgent:
     def __init__(self):
+        log.debug("Initialising StrategistAgent")
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    
-    async def identify_rounds(self, jd_analysis: dict, company_research: dict) -> list:
-        """
-        Predict the likely interview rounds based on company and role.
-        """
-        context = f"""
-JD Analysis:
-{jd_analysis.get('jd_analysis', 'Not available')}
 
-Company Research:
-{company_research.get('research_summary', 'Not available')}
-"""
-        
+    async def identify_rounds(self, jd_analysis: dict, company_research: dict) -> dict:
+        """Predict the likely interview rounds based on company and role."""
+        company = company_research.get("company_name", "the company")
+        role    = company_research.get("role", "the role")
+        log.info("Identifying interview rounds | company='%s' | role='%s'", company, role)
+
+        context = (
+            f"JD Analysis:\n{jd_analysis.get('jd_analysis', 'Not available')}\n\n"
+            f"Company Research:\n{company_research.get('research_summary', 'Not available')}"
+        )
+
         prompt = f"""Based on this information, predict the interview rounds for this position:
 
 {context}
@@ -34,40 +39,47 @@ For each round, provide:
 
 Return 4-6 likely rounds in order. Be specific to the role and company."""
 
+        log.debug("Calling OpenAI gpt-4o-mini to identify interview rounds")
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
-            temperature=0.6
+            temperature=0.6,
         )
-        
-        # Parse the response into structured rounds
+
         rounds_text = response.choices[0].message.content
-        
+        estimated = self._count_rounds(rounds_text)
+
+        log.info(
+            "Interview rounds identified | estimated_rounds=%d | response_length=%d chars",
+            estimated, len(rounds_text),
+        )
+
         return {
             "rounds_breakdown": rounds_text,
-            "estimated_rounds": self._count_rounds(rounds_text)
+            "estimated_rounds": estimated,
         }
-    
+
     def _count_rounds(self, text: str) -> int:
         """Estimate number of rounds from text."""
-        # Simple heuristic - count numbered items
-        import re
-        matches = re.findall(r'(?:Round|Stage|Interview)\s*\d+|^\d+\.', text, re.MULTILINE | re.IGNORECASE)
-        return max(len(matches), 4)  # At least 4 rounds
-    
-    async def analyze_role_seniority(self, resume_analysis: dict, jd_analysis: dict) -> dict:
-        """
-        Determine if this is a fresher role or experienced position.
-        """
-        context = f"""
-Resume Analysis:
-{resume_analysis.get('resume_analysis', 'Not available')[:1000]}
+        matches = re.findall(
+            r'(?:Round|Stage|Interview)\s*\d+|^\d+\.', text, re.MULTILINE | re.IGNORECASE
+        )
+        count = max(len(matches), 4)
+        log.debug("Round count heuristic | regex_matches=%d | final_count=%d", len(matches), count)
+        return count
 
-JD Analysis:
-{jd_analysis.get('jd_analysis', 'Not available')[:1000]}
-"""
-        
+    async def analyze_role_seniority(
+        self, resume_analysis: dict, jd_analysis: dict
+    ) -> dict:
+        """Determine if this is a fresher role or experienced position."""
+        log.info("Analysing role seniority")
+
+        context = (
+            f"Resume Analysis:\n{resume_analysis.get('resume_analysis', 'Not available')[:1000]}\n\n"
+            f"JD Analysis:\n{jd_analysis.get('jd_analysis', 'Not available')[:1000]}"
+        )
+
         prompt = f"""Analyze the candidate's experience level vs job requirements:
 
 {context}
@@ -81,27 +93,35 @@ Determine:
 
 Be practical and actionable."""
 
+        log.debug("Calling OpenAI gpt-4o-mini for seniority analysis")
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800,
-            temperature=0.5
+            temperature=0.5,
         )
-        
+
+        analysis_text = response.choices[0].message.content
+        is_fresher = "fresher" in analysis_text.lower()
+        log.info("Seniority analysis complete | is_fresher=%s", is_fresher)
+
         return {
-            "seniority_analysis": response.choices[0].message.content,
-            "is_fresher": "fresher" in response.choices[0].message.content.lower()
+            "seniority_analysis": analysis_text,
+            "is_fresher": is_fresher,
         }
-    
+
     async def generate_preparation_strategy(
-        self, 
-        rounds: dict, 
-        resume_analysis: dict, 
-        jd_analysis: dict
+        self,
+        rounds: dict,
+        resume_analysis: dict,
+        jd_analysis: dict,
     ) -> dict:
-        """
-        Create a personalized preparation strategy.
-        """
+        """Create a personalised preparation strategy."""
+        log.info(
+            "Generating preparation strategy | estimated_rounds=%s",
+            rounds.get("estimated_rounds"),
+        )
+
         prompt = f"""Create a personalized interview preparation strategy.
 
 Candidate Profile:
@@ -122,13 +142,17 @@ Provide:
 
 Be specific and actionable for THIS candidate and THIS role."""
 
+        log.debug("Calling OpenAI gpt-4o to generate preparation strategy")
         response = self.client.chat.completions.create(
-            model="gpt-4o",  # Use better model for strategy
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1500,
-            temperature=0.7
+            temperature=0.7,
         )
-        
-        return {
-            "preparation_strategy": response.choices[0].message.content
-        }
+
+        strategy_text = response.choices[0].message.content
+        log.info(
+            "Preparation strategy generated | strategy_length=%d chars", len(strategy_text)
+        )
+
+        return {"preparation_strategy": strategy_text}

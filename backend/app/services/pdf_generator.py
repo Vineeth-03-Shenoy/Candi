@@ -2,61 +2,67 @@
 PDF Generator Service - Creates the interview prep guide PDF
 """
 import os
+import re
 from datetime import datetime
+
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.colors import HexColor
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT  # noqa: F401 (TA_LEFT kept for future use)
+
+from app.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class PDFGenerator:
     def __init__(self):
+        log.debug("Initialising PDFGenerator")
         self.output_dir = os.path.join(os.path.dirname(__file__), "..", "..", "output")
         os.makedirs(self.output_dir, exist_ok=True)
-        
-        # Define styles
+        log.debug("PDF output directory: %s", os.path.abspath(self.output_dir))
+
         self.styles = getSampleStyleSheet()
         self._create_custom_styles()
-    
+
     def _create_custom_styles(self):
         """Create custom paragraph styles."""
+        log.debug("Creating custom ReportLab styles")
+
         self.styles.add(ParagraphStyle(
-            name='CustomTitle',
-            parent=self.styles['Heading1'],
+            name="CustomTitle",
+            parent=self.styles["Heading1"],
             fontSize=24,
             spaceAfter=30,
             alignment=TA_CENTER,
-            textColor=HexColor('#0891b2')  # Cyan-600
+            textColor=HexColor("#0891b2"),
         ))
-        
         self.styles.add(ParagraphStyle(
-            name='SectionTitle',
-            parent=self.styles['Heading2'],
+            name="SectionTitle",
+            parent=self.styles["Heading2"],
             fontSize=16,
             spaceBefore=20,
             spaceAfter=10,
-            textColor=HexColor('#1e40af')  # Blue-800
+            textColor=HexColor("#1e40af"),
         ))
-        
         self.styles.add(ParagraphStyle(
-            name='SubSection',
-            parent=self.styles['Heading3'],
+            name="SubSection",
+            parent=self.styles["Heading3"],
             fontSize=12,
             spaceBefore=15,
             spaceAfter=8,
-            textColor=HexColor('#3b82f6')  # Blue-500
+            textColor=HexColor("#3b82f6"),
         ))
-        
         self.styles.add(ParagraphStyle(
-            name='CustomBodyText',
-            parent=self.styles['Normal'],
+            name="CustomBodyText",
+            parent=self.styles["Normal"],
             fontSize=10,
             spaceAfter=8,
-            leading=14
+            leading=14,
         ))
-    
+
     def generate_prep_guide(
         self,
         company_name: str,
@@ -67,132 +73,138 @@ class PDFGenerator:
         strategy: dict,
         questions: dict,
         behavioral_questions: dict = None,
-        technical_questions: dict = None
+        technical_questions: dict = None,
     ) -> str:
         """
         Generate a comprehensive interview prep guide PDF.
-        
-        Returns the path to the generated PDF.
+        Returns the absolute path to the generated file.
         """
+        log.info(
+            "Generating PDF prep guide | company='%s' | role='%s'",
+            company_name, role_name,
+        )
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"Interview_Prep_{company_name.replace(' ', '_')}_{timestamp}.pdf"
-        filepath = os.path.join(self.output_dir, filename)
-        
+        filename  = f"Interview_Prep_{company_name.replace(' ', '_')}_{timestamp}.pdf"
+        filepath  = os.path.join(self.output_dir, filename)
+        log.debug("PDF output path: %s", filepath)
+
         doc = SimpleDocTemplate(
             filepath,
             pagesize=letter,
-            rightMargin=0.75*inch,
-            leftMargin=0.75*inch,
-            topMargin=0.75*inch,
-            bottomMargin=0.75*inch
+            rightMargin=0.75 * inch,
+            leftMargin=0.75 * inch,
+            topMargin=0.75 * inch,
+            bottomMargin=0.75 * inch,
         )
-        
+
         story = []
-        
-        # Title Page
-        story.append(Spacer(1, 2*inch))
-        story.append(Paragraph(
-            f"Interview Preparation Guide",
-            self.styles['CustomTitle']
-        ))
-        story.append(Paragraph(
-            f"{role_name} at {company_name}",
-            self.styles['Heading2']
-        ))
-        story.append(Spacer(1, 0.5*inch))
+
+        # Title page
+        log.debug("Building PDF title page")
+        story.append(Spacer(1, 2 * inch))
+        story.append(Paragraph("Interview Preparation Guide", self.styles["CustomTitle"]))
+        story.append(Paragraph(f"{role_name} at {company_name}", self.styles["Heading2"]))
+        story.append(Spacer(1, 0.5 * inch))
         story.append(Paragraph(
             f"Generated by Candi AI | {datetime.now().strftime('%B %d, %Y')}",
-            ParagraphStyle(name='SubTitle', parent=self.styles['Normal'], alignment=TA_CENTER, textColor=HexColor('#6b7280'))
+            ParagraphStyle(
+                name="SubTitle",
+                parent=self.styles["Normal"],
+                alignment=TA_CENTER,
+                textColor=HexColor("#6b7280"),
+            ),
         ))
         story.append(PageBreak())
-        
-        # Resume Analysis Section
-        story.append(Paragraph("📄 Your Profile Analysis", self.styles['SectionTitle']))
+
+        # Resume analysis
+        log.debug("Adding resume analysis section")
+        story.append(Paragraph("Your Profile Analysis", self.styles["SectionTitle"]))
         story.append(Paragraph(
-            self._clean_markdown(resume_analysis.get('resume_analysis', 'Not available')),
-            self.styles['CustomBodyText']
+            self._clean_markdown(resume_analysis.get("resume_analysis", "Not available")),
+            self.styles["CustomBodyText"],
         ))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # JD Analysis Section
-        story.append(Paragraph("📋 Job Requirements Analysis", self.styles['SectionTitle']))
+        story.append(Spacer(1, 0.3 * inch))
+
+        # JD analysis
+        log.debug("Adding JD analysis section")
+        story.append(Paragraph("Job Requirements Analysis", self.styles["SectionTitle"]))
         story.append(Paragraph(
-            self._clean_markdown(jd_analysis.get('jd_analysis', 'Not available')),
-            self.styles['CustomBodyText']
-        ))
-        story.append(PageBreak())
-        
-        # Interview Rounds
-        story.append(Paragraph("🎯 Expected Interview Rounds", self.styles['SectionTitle']))
-        story.append(Paragraph(
-            self._clean_markdown(rounds.get('rounds_breakdown', 'Not available')),
-            self.styles['CustomBodyText']
-        ))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Preparation Strategy
-        story.append(Paragraph("📚 Your Preparation Strategy", self.styles['SectionTitle']))
-        story.append(Paragraph(
-            self._clean_markdown(strategy.get('preparation_strategy', 'Not available')),
-            self.styles['CustomBodyText']
+            self._clean_markdown(jd_analysis.get("jd_analysis", "Not available")),
+            self.styles["CustomBodyText"],
         ))
         story.append(PageBreak())
-        
-        # Questions & Answers
-        story.append(Paragraph("❓ Practice Questions & Answers", self.styles['SectionTitle']))
+
+        # Interview rounds
+        log.debug("Adding interview rounds section")
+        story.append(Paragraph("Expected Interview Rounds", self.styles["SectionTitle"]))
         story.append(Paragraph(
-            self._clean_markdown(questions.get('comprehensive_questions', 'Not available')),
-            self.styles['CustomBodyText']
+            self._clean_markdown(rounds.get("rounds_breakdown", "Not available")),
+            self.styles["CustomBodyText"],
         ))
-        
+        story.append(Spacer(1, 0.3 * inch))
+
+        # Preparation strategy
+        log.debug("Adding preparation strategy section")
+        story.append(Paragraph("Your Preparation Strategy", self.styles["SectionTitle"]))
+        story.append(Paragraph(
+            self._clean_markdown(strategy.get("preparation_strategy", "Not available")),
+            self.styles["CustomBodyText"],
+        ))
+        story.append(PageBreak())
+
+        # Questions & answers
+        log.debug("Adding Q&A section")
+        story.append(Paragraph("Practice Questions & Answers", self.styles["SectionTitle"]))
+        story.append(Paragraph(
+            self._clean_markdown(questions.get("comprehensive_questions", "Not available")),
+            self.styles["CustomBodyText"],
+        ))
+
         if behavioral_questions:
+            log.debug("Adding behavioral questions section")
             story.append(PageBreak())
-            story.append(Paragraph("🤝 Behavioral Questions", self.styles['SectionTitle']))
+            story.append(Paragraph("Behavioral Questions", self.styles["SectionTitle"]))
             story.append(Paragraph(
-                self._clean_markdown(behavioral_questions.get('behavioral_questions', 'Not available')),
-                self.styles['CustomBodyText']
+                self._clean_markdown(behavioral_questions.get("behavioral_questions", "Not available")),
+                self.styles["CustomBodyText"],
             ))
-        
+
         if technical_questions:
+            log.debug("Adding technical deep dives section")
             story.append(PageBreak())
-            story.append(Paragraph("💻 Technical Deep Dives", self.styles['SectionTitle']))
+            story.append(Paragraph("Technical Deep Dives", self.styles["SectionTitle"]))
             story.append(Paragraph(
-                self._clean_markdown(technical_questions.get('technical_questions', 'Not available')),
-                self.styles['CustomBodyText']
+                self._clean_markdown(technical_questions.get("technical_questions", "Not available")),
+                self.styles["CustomBodyText"],
             ))
-        
-        # Build the PDF
+
+        log.debug("Building PDF document (ReportLab render)")
         doc.build(story)
-        
+
+        file_size_kb = os.path.getsize(filepath) // 1024
+        log.info(
+            "PDF generated successfully | file='%s' | size=%d KB",
+            filename, file_size_kb,
+        )
         return filepath
-    
+
     def _clean_markdown(self, text: str) -> str:
-        """
-        Clean markdown formatting for PDF rendering.
-        Convert **bold** to <b>bold</b>, etc.
-        """
+        """Convert markdown formatting to ReportLab-compatible HTML tags."""
         if not text:
             return ""
-        
-        # Convert markdown bold to HTML
-        import re
-        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-        text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
-        
-        # Convert markdown headers to bold
-        text = re.sub(r'^### (.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
-        text = re.sub(r'^## (.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
-        text = re.sub(r'^# (.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
-        
-        # Convert bullet points
-        text = re.sub(r'^- ', r'• ', text, flags=re.MULTILINE)
-        text = re.sub(r'^\* ', r'• ', text, flags=re.MULTILINE)
-        
-        # Convert numbered lists
-        text = re.sub(r'^(\d+)\. ', r'\1. ', text, flags=re.MULTILINE)
-        
-        # Replace newlines with <br/> for proper rendering
-        text = text.replace('\n\n', '<br/><br/>')
-        text = text.replace('\n', '<br/>')
-        
+
+        log.debug("Cleaning markdown | input_length=%d chars", len(text))
+
+        text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+        text = re.sub(r"\*(.+?)\*",     r"<i>\1</i>", text)
+        text = re.sub(r"^### (.+)$",    r"<b>\1</b>", text, flags=re.MULTILINE)
+        text = re.sub(r"^## (.+)$",     r"<b>\1</b>", text, flags=re.MULTILINE)
+        text = re.sub(r"^# (.+)$",      r"<b>\1</b>", text, flags=re.MULTILINE)
+        text = re.sub(r"^- ",           r"• ",        text, flags=re.MULTILINE)
+        text = re.sub(r"^\* ",          r"• ",        text, flags=re.MULTILINE)
+
+        text = text.replace("\n\n", "<br/><br/>")
+        text = text.replace("\n",   "<br/>")
+
         return text
