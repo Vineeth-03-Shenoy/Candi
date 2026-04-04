@@ -1,11 +1,5 @@
 """
 Research Agent - Deep research for interview experiences and company info
-
-Searches various sources for:
-- Interview experiences (GeeksforGeeks, Glassdoor patterns)
-- Company culture and values
-- Role-specific requirements
-- Real technical Q&A from trusted sources
 """
 import os
 import re
@@ -17,6 +11,7 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 
 from app.utils.logger import get_logger
+from app.utils.llm_logger import llm_call
 
 log = get_logger(__name__)
 
@@ -42,15 +37,13 @@ class ResearchAgent:
     # ------------------------------------------------------------------
 
     async def _search_duckduckgo(self, query: str, max_results: int = 5) -> list[dict]:
-        """Search DuckDuckGo HTML interface and return result dicts."""
         log.debug("DuckDuckGo search | max_results=%d | query='%s'", max_results, query)
         try:
             url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
             response = await self.http_client.get(url)
-            log.debug("DuckDuckGo response | status=%d | url='%s'", response.status_code, url)
+            log.debug("DuckDuckGo response | status=%d", response.status_code)
 
             soup = BeautifulSoup(response.text, "html.parser")
-
             results = []
             for el in soup.select(".result")[:max_results]:
                 title_el   = el.select_one(".result__a")
@@ -72,7 +65,6 @@ class ResearchAgent:
             return []
 
     async def _scrape_page(self, url: str, max_chars: int = 4000) -> str:
-        """Scrape and extract clean text from a URL. Returns empty string on failure."""
         log.debug("Scraping page | url='%s' | max_chars=%d", url, max_chars)
         try:
             if not url.startswith("http"):
@@ -107,7 +99,6 @@ class ResearchAgent:
     # ------------------------------------------------------------------
 
     def _extract_company_role(self, jd_analysis_text: str) -> tuple[str, str]:
-        """Parse company name and role title from the JD analysis text."""
         log.debug("Extracting company and role from JD analysis text")
         company = "Target Company"
         role    = "Software Engineer"
@@ -134,7 +125,6 @@ class ResearchAgent:
         return company, role
 
     def _extract_skills_from_jd(self, jd_analysis_text: str) -> list[str]:
-        """Extract top required skills from the JD analysis text."""
         log.debug("Extracting required skills from JD analysis text")
         match = re.search(
             r'\*\*Required Skills\*\*[:\s]+(.*?)(?=\n\d+\.|\n\*\*|\Z)',
@@ -163,17 +153,12 @@ class ResearchAgent:
         return skills
 
     # ------------------------------------------------------------------
-    # Phase 2 – Real web research
+    # Web research
     # ------------------------------------------------------------------
 
     async def research_company(self, company_name: str, role: str) -> dict:
-        """
-        Research company interview patterns using real web search + scraping.
-        Falls back to LLM synthesis if web data is sparse.
-        """
         log.info("Starting company research | company='%s' | role='%s'", company_name, role)
 
-        log.debug("Launching parallel DDG searches for company research")
         search1, search2 = await asyncio.gather(
             self._search_duckduckgo(
                 f"{company_name} {role} interview process rounds 2024", max_results=4
@@ -195,7 +180,6 @@ class ResearchAgent:
             if r.get("url") and r["url"].startswith("http")
         ][:2]
 
-        log.debug("Scraping %d pages for company research", len(urls_to_scrape))
         page_contents: list[str] = []
         if urls_to_scrape:
             page_contents = await asyncio.gather(
@@ -228,7 +212,8 @@ Based on this data (supplement gaps with general patterns for this type of compa
 Clearly note if specific data was limited."""
 
         log.debug("Calling OpenAI gpt-4o-mini to synthesise company research")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
@@ -246,18 +231,12 @@ Clearly note if specific data was limited."""
             "role": role,
             "research_summary": summary,
             "sources": [r.get("url", "") for r in all_results if r.get("url")],
+            "_tokens": tokens,
         }
 
     async def search_interview_experiences(self, company_name: str, role: str) -> list[dict]:
-        """
-        Search for real interview experiences from GeeksforGeeks and other sources.
-        """
-        log.info(
-            "Searching for interview experiences | company='%s' | role='%s'",
-            company_name, role,
-        )
+        log.info("Searching for interview experiences | company='%s' | role='%s'", company_name, role)
 
-        log.debug("Launching parallel DDG searches for interview experiences")
         gfg_results, general_results = await asyncio.gather(
             self._search_duckduckgo(
                 f"{company_name} interview experience {role} site:geeksforgeeks.org",
@@ -279,10 +258,8 @@ Clearly note if specific data was limited."""
             r["url"] for r in gfg_results[:2]
             if r.get("url") and "geeksforgeeks.org" in r["url"]
         ]
-        log.debug("GFG URLs to scrape: %s", gfg_urls)
 
         if gfg_urls:
-            log.debug("Scraping %d GFG interview experience pages", len(gfg_urls))
             contents = await asyncio.gather(
                 *[self._scrape_page(u, max_chars=3000) for u in gfg_urls]
             )
@@ -296,12 +273,11 @@ Clearly note if specific data was limited."""
             for r in general_results if r.get("snippet")
         ]
         if snippets:
-            log.debug("Adding %d web search snippets as supplementary experience data", len(snippets))
             experiences.append({"source": "Web Search", "content": "\n".join(snippets[:6])})
 
         if not experiences:
             log.warning(
-                "No interview experience data found for '%s %s' — using fallback message",
+                "No interview experience data found for '%s %s' — using fallback",
                 company_name, role,
             )
             experiences.append({
@@ -312,17 +288,10 @@ Clearly note if specific data was limited."""
                 ),
             })
 
-        log.info(
-            "Interview experience search complete | sources=%d",
-            len(experiences),
-        )
+        log.info("Interview experience search complete | sources=%d", len(experiences))
         return experiences
 
     async def fetch_technical_qa(self, skills: list[str], role: str) -> dict[str, str]:
-        """
-        Fetch real technical Q&A for each key skill from GeeksforGeeks and InterviewBit.
-        Returns a dict mapping skill → scraped Q&A text.
-        """
         if not skills:
             log.info("fetch_technical_qa called with no skills — skipping")
             return {}
@@ -339,7 +308,6 @@ Clearly note if specific data was limited."""
             for r in results:
                 url = r.get("url", "")
                 if url and ("geeksforgeeks.org" in url or "interviewbit.com" in url):
-                    log.debug("Scraping trusted Q&A source | skill='%s' | url='%s'", skill, url)
                     content = await self._scrape_page(url, max_chars=4000)
                     if content and len(content) > 300:
                         log.info("Technical Q&A fetched | skill='%s' | length=%d chars", skill, len(content))
@@ -348,7 +316,6 @@ Clearly note if specific data was limited."""
             log.warning("No trusted source found for skill='%s' — using snippet fallback", skill)
             return skill, fallback
 
-        log.debug("Launching parallel Q&A fetch for %d skills", len(skills[:5]))
         pairs = await asyncio.gather(*[_fetch_one(s) for s in skills[:5]])
         technical_qa = {skill: content for skill, content in pairs if content}
 
@@ -359,11 +326,10 @@ Clearly note if specific data was limited."""
         return technical_qa
 
     # ------------------------------------------------------------------
-    # Existing methods
+    # Resume / JD analysis
     # ------------------------------------------------------------------
 
     async def extract_jd_info(self, jd_text: str) -> dict:
-        """Extract structured information from job description."""
         log.info("Extracting JD info | jd_length=%d chars", len(jd_text))
 
         prompt = f"""Analyze this job description and extract:
@@ -382,7 +348,8 @@ Job Description:
 Respond in a structured format."""
 
         log.debug("Calling OpenAI gpt-4o-mini to extract JD info")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000,
@@ -392,12 +359,12 @@ Respond in a structured format."""
         result = {
             "jd_analysis": response.choices[0].message.content,
             "raw_jd": jd_text[:1000],
+            "_tokens": tokens,
         }
         log.info("JD info extracted | analysis_length=%d chars", len(result["jd_analysis"]))
         return result
 
     async def extract_resume_info(self, resume_text: str) -> dict:
-        """Extract structured information from resume."""
         log.info("Extracting resume info | resume_length=%d chars", len(resume_text))
 
         prompt = f"""Analyze this resume and extract:
@@ -417,7 +384,8 @@ Resume:
 Respond in a structured format."""
 
         log.debug("Calling OpenAI gpt-4o-mini to extract resume info")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000,
@@ -427,11 +395,11 @@ Respond in a structured format."""
         result = {
             "resume_analysis": response.choices[0].message.content,
             "raw_resume": resume_text[:1000],
+            "_tokens": tokens,
         }
         log.info("Resume info extracted | analysis_length=%d chars", len(result["resume_analysis"]))
         return result
 
     async def close(self):
-        """Cleanup HTTP client."""
         log.debug("Closing ResearchAgent HTTP client")
         await self.http_client.aclose()

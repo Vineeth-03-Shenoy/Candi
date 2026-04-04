@@ -32,7 +32,9 @@ backend/output/
 
 # Logs
 *.log
+*.jsonl
 npm-debug.log*
+backend/Logs/
 
 # Python
 *.egg-info/

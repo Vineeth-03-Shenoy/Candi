@@ -11,6 +11,7 @@ from openai import OpenAI
 from typing import Literal
 
 from app.utils.logger import get_logger
+from app.utils.llm_logger import llm_call
 
 log = get_logger(__name__)
 
@@ -57,7 +58,7 @@ class IntentRouter:
 
     async def simple_chat_response(
         self, message: str, conversation_history: list = None
-    ) -> str:
+    ) -> tuple[str, dict]:
         """Generate a quick response without using agents."""
         history_len = len(conversation_history) if conversation_history else 0
         log.info("simple_chat_response | history_messages=%d", history_len)
@@ -75,7 +76,8 @@ class IntentRouter:
         messages.append({"role": "user", "content": message})
 
         log.debug("Calling OpenAI gpt-4o-mini for simple chat (%d total messages)", len(messages))
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=messages,
             max_tokens=500,
@@ -84,7 +86,7 @@ class IntentRouter:
 
         reply = response.choices[0].message.content
         log.info("simple_chat_response complete | reply_length=%d chars", len(reply))
-        return reply
+        return reply, tokens
 
     async def quick_question_response(
         self,
@@ -92,7 +94,7 @@ class IntentRouter:
         resume_text: str = "",
         jd_text: str = "",
         prep_context: dict = None,
-    ) -> str:
+    ) -> tuple[str, dict]:
         """Answer a specific question using the uploaded documents as context."""
         log.info(
             "quick_question_response | has_resume=%s has_jd=%s has_prep_context=%s",
@@ -118,7 +120,8 @@ class IntentRouter:
         ]
 
         log.debug("Calling OpenAI gpt-4o-mini for quick question (%d messages)", len(messages))
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=messages,
             max_tokens=800,
@@ -127,4 +130,4 @@ class IntentRouter:
 
         reply = response.choices[0].message.content
         log.info("quick_question_response complete | reply_length=%d chars", len(reply))
-        return reply
+        return reply, tokens

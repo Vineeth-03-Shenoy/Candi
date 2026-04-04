@@ -6,6 +6,7 @@ import re
 from openai import OpenAI
 
 from app.utils.logger import get_logger
+from app.utils.llm_logger import llm_call
 
 log = get_logger(__name__)
 
@@ -16,7 +17,6 @@ class StrategistAgent:
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     async def identify_rounds(self, jd_analysis: dict, company_research: dict) -> dict:
-        """Predict the likely interview rounds based on company and role."""
         company = company_research.get("company_name", "the company")
         role    = company_research.get("role", "the role")
         log.info("Identifying interview rounds | company='%s' | role='%s'", company, role)
@@ -40,7 +40,8 @@ For each round, provide:
 Return 4-6 likely rounds in order. Be specific to the role and company."""
 
         log.debug("Calling OpenAI gpt-4o-mini to identify interview rounds")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
@@ -48,7 +49,7 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         )
 
         rounds_text = response.choices[0].message.content
-        estimated = self._count_rounds(rounds_text)
+        estimated   = self._count_rounds(rounds_text)
 
         log.info(
             "Interview rounds identified | estimated_rounds=%d | response_length=%d chars",
@@ -58,10 +59,10 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         return {
             "rounds_breakdown": rounds_text,
             "estimated_rounds": estimated,
+            "_tokens": tokens,
         }
 
     def _count_rounds(self, text: str) -> int:
-        """Estimate number of rounds from text."""
         matches = re.findall(
             r'(?:Round|Stage|Interview)\s*\d+|^\d+\.', text, re.MULTILINE | re.IGNORECASE
         )
@@ -72,7 +73,6 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
     async def analyze_role_seniority(
         self, resume_analysis: dict, jd_analysis: dict
     ) -> dict:
-        """Determine if this is a fresher role or experienced position."""
         log.info("Analysing role seniority")
 
         context = (
@@ -94,7 +94,8 @@ Determine:
 Be practical and actionable."""
 
         log.debug("Calling OpenAI gpt-4o-mini for seniority analysis")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800,
@@ -102,12 +103,13 @@ Be practical and actionable."""
         )
 
         analysis_text = response.choices[0].message.content
-        is_fresher = "fresher" in analysis_text.lower()
+        is_fresher    = "fresher" in analysis_text.lower()
         log.info("Seniority analysis complete | is_fresher=%s", is_fresher)
 
         return {
             "seniority_analysis": analysis_text,
             "is_fresher": is_fresher,
+            "_tokens": tokens,
         }
 
     async def generate_preparation_strategy(
@@ -116,7 +118,6 @@ Be practical and actionable."""
         resume_analysis: dict,
         jd_analysis: dict,
     ) -> dict:
-        """Create a personalised preparation strategy."""
         log.info(
             "Generating preparation strategy | estimated_rounds=%s",
             rounds.get("estimated_rounds"),
@@ -143,7 +144,8 @@ Provide:
 Be specific and actionable for THIS candidate and THIS role."""
 
         log.debug("Calling OpenAI gpt-4o to generate preparation strategy")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1500,
@@ -151,8 +153,9 @@ Be specific and actionable for THIS candidate and THIS role."""
         )
 
         strategy_text = response.choices[0].message.content
-        log.info(
-            "Preparation strategy generated | strategy_length=%d chars", len(strategy_text)
-        )
+        log.info("Preparation strategy generated | strategy_length=%d chars", len(strategy_text))
 
-        return {"preparation_strategy": strategy_text}
+        return {
+            "preparation_strategy": strategy_text,
+            "_tokens": tokens,
+        }

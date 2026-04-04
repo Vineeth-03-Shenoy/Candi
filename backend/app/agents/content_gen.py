@@ -6,8 +6,20 @@ import os
 from openai import OpenAI
 
 from app.utils.logger import get_logger
+from app.utils.llm_logger import llm_call
 
 log = get_logger(__name__)
+
+
+def _sum_tokens(*token_dicts: dict) -> dict:
+    """Merge multiple token-count dicts into one cumulative total."""
+    total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    for t in token_dicts:
+        if t:
+            total["prompt_tokens"]     += t.get("prompt_tokens", 0)
+            total["completion_tokens"] += t.get("completion_tokens", 0)
+            total["total_tokens"]      += t.get("total_tokens", 0)
+    return total
 
 
 class ContentGenAgent:
@@ -24,7 +36,6 @@ class ContentGenAgent:
         company_research: dict | None,
         interview_experiences: list[dict] | None,
     ) -> str:
-        """Build a research context block to inject into prompts."""
         parts: list[str] = []
 
         if company_research and company_research.get("research_summary"):
@@ -32,7 +43,8 @@ class ContentGenAgent:
                 "Company Research (web-sourced):\n"
                 + company_research["research_summary"][:800]
             )
-            log.debug("Research context: company research included (%d chars)", len(company_research["research_summary"][:800]))
+            log.debug("Research context: company research included (%d chars)",
+                      len(company_research["research_summary"][:800]))
 
         if interview_experiences:
             exp_lines: list[str] = []
@@ -48,7 +60,6 @@ class ContentGenAgent:
         return ("\n\n" + "\n\n".join(parts)) if parts else ""
 
     def _technical_qa_context(self, technical_qa: dict[str, str] | None) -> str:
-        """Build a technical Q&A context block from scraped trusted sources."""
         if not technical_qa:
             log.debug("No technical Q&A context available")
             return ""
@@ -72,7 +83,6 @@ class ContentGenAgent:
         company_research: dict | None = None,
         interview_experiences: list[dict] | None = None,
     ) -> dict:
-        """Generate specific questions for a given interview round."""
         log.info(
             "Generating questions for round | has_research=%s | has_experiences=%s",
             bool(company_research), bool(interview_experiences),
@@ -102,7 +112,8 @@ For each question, provide:
 Generate 5-8 questions relevant to this round type."""
 
         log.debug("Calling OpenAI gpt-4o for round question generation")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000,
@@ -111,7 +122,7 @@ Generate 5-8 questions relevant to this round type."""
 
         result = response.choices[0].message.content
         log.info("Round questions generated | length=%d chars", len(result))
-        return {"round_questions": result}
+        return {"round_questions": result, "_tokens": tokens}
 
     async def generate_all_questions(
         self,
@@ -121,14 +132,13 @@ Generate 5-8 questions relevant to this round type."""
         company_research: dict | None = None,
         interview_experiences: list[dict] | None = None,
     ) -> dict:
-        """Generate questions for all interview rounds, grounded in real research."""
         log.info(
             "Generating all questions | rounds=%s | has_research=%s | has_experiences=%s",
             rounds.get("estimated_rounds"), bool(company_research), bool(interview_experiences),
         )
 
-        rounds_text   = rounds.get("rounds_breakdown", "")
-        research_ctx  = self._company_research_context(company_research, interview_experiences)
+        rounds_text  = rounds.get("rounds_breakdown", "")
+        research_ctx = self._company_research_context(company_research, interview_experiences)
 
         prompt = f"""Generate a complete interview preparation guide with questions and answers.
 
@@ -150,7 +160,8 @@ Instructions:
 - Be thorough and specific to this role and company."""
 
         log.debug("Calling OpenAI gpt-4o for comprehensive question generation")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=4000,
@@ -159,7 +170,7 @@ Instructions:
 
         result = response.choices[0].message.content
         log.info("All questions generated | length=%d chars", len(result))
-        return {"comprehensive_questions": result}
+        return {"comprehensive_questions": result, "_tokens": tokens}
 
     async def generate_behavioral_questions(
         self,
@@ -167,7 +178,6 @@ Instructions:
         interview_experiences: list[dict] | None = None,
         company_research: dict | None = None,
     ) -> dict:
-        """Generate behavioral questions grounded in real company culture and experiences."""
         log.info(
             "Generating behavioral questions | has_research=%s | has_experiences=%s",
             bool(company_research), bool(interview_experiences),
@@ -190,7 +200,8 @@ Generate 8 behavioral questions using the STAR method:
 Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Learning."""
 
         log.debug("Calling OpenAI gpt-4o-mini for behavioral question generation")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1500,
@@ -199,7 +210,7 @@ Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Le
 
         result = response.choices[0].message.content
         log.info("Behavioral questions generated | length=%d chars", len(result))
-        return {"behavioral_questions": result}
+        return {"behavioral_questions": result, "_tokens": tokens}
 
     async def generate_technical_deep_dives(
         self,
@@ -207,10 +218,6 @@ Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Le
         resume_analysis: dict,
         technical_qa: dict[str, str] | None = None,
     ) -> dict:
-        """
-        Generate deep technical questions with accurate answers grounded in
-        real Q&A scraped from GeeksforGeeks and InterviewBit.
-        """
         log.info(
             "Generating technical deep dives | skills_with_data=%d",
             len(technical_qa) if technical_qa else 0,
@@ -237,7 +244,8 @@ Instructions:
 - Be technically precise."""
 
         log.debug("Calling OpenAI gpt-4o for technical deep dive generation")
-        response = self.client.chat.completions.create(
+        response, tokens = llm_call(
+            self.client, __name__,
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=3000,
@@ -246,4 +254,4 @@ Instructions:
 
         result = response.choices[0].message.content
         log.info("Technical deep dives generated | length=%d chars", len(result))
-        return {"technical_questions": result}
+        return {"technical_questions": result, "_tokens": tokens}
