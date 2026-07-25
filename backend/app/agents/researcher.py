@@ -1,9 +1,12 @@
 """
 Research Agent - Deep research for interview experiences and company info
 """
+import json
 import os
 import re
 import asyncio
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote_plus
 
 import httpx
@@ -14,6 +17,29 @@ from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
 
 log = get_logger(__name__)
+
+
+# ------------------------------------------------------------------
+# Web search logger
+# ------------------------------------------------------------------
+
+def _web_search_log_path() -> Path:
+    """Return path to today's web search JSONL log, creating dirs as needed."""
+    now = datetime.now()
+    backend_root = Path(__file__).resolve().parents[2]
+    log_dir = backend_root / "Logs" / now.strftime("%Y") / now.strftime("%B")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / f"web_search_{now.strftime('%Y-%m-%d')}.jsonl"
+
+
+def _log_web_search(entry: dict) -> None:
+    """Append a single JSON entry to today's web search JSONL log."""
+    try:
+        path = _web_search_log_path()
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        log.warning("Failed to write web search log | error=%s", exc)
 
 
 class ResearchAgent:
@@ -59,6 +85,14 @@ class ResearchAgent:
                     results.append({"title": title, "snippet": snippet, "url": raw_url})
 
             log.info("DuckDuckGo search returned %d results | query='%s'", len(results), query[:80])
+            _log_web_search({
+                "timestamp": datetime.now().isoformat(),
+                "type": "ddg_search",
+                "query": query,
+                "max_results": max_results,
+                "results_count": len(results),
+                "results": results,
+            })
             return results
         except Exception as exc:
             log.warning("DuckDuckGo search failed | query='%s' | error=%s", query[:80], exc)
@@ -89,6 +123,13 @@ class ResearchAgent:
             content = "\n".join(lines)[:max_chars]
 
             log.info("Scraped page | url='%s' | content_length=%d chars", url, len(content))
+            _log_web_search({
+                "timestamp": datetime.now().isoformat(),
+                "type": "page_scrape",
+                "url": url,
+                "content_length": len(content),
+                "content_preview": content[:500],
+            })
             return content
         except Exception as exc:
             log.warning("Page scrape failed | url='%s' | error=%s", url, exc)
@@ -211,13 +252,16 @@ Based on this data (supplement gaps with general patterns for this type of compa
 
 Clearly note if specific data was limited."""
 
-        log.debug("Calling OpenAI gpt-4o-mini to synthesise company research")
+        model       = os.getenv("RESEARCHER_COMPANY_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("RESEARCHER_COMPANY_MAX_TOKENS",  "1200"))
+        temperature = float(os.getenv("RESEARCHER_COMPANY_TEMPERATURE", "0.3"))
+        log.debug("Calling %s to synthesise company research", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200,
-            temperature=0.3,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         summary = response.choices[0].message.content
@@ -347,13 +391,16 @@ Job Description:
 
 Respond in a structured format."""
 
-        log.debug("Calling OpenAI gpt-4o-mini to extract JD info")
+        model       = os.getenv("RESEARCHER_JD_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("RESEARCHER_JD_MAX_TOKENS",  "1000"))
+        temperature = float(os.getenv("RESEARCHER_JD_TEMPERATURE", "0.3"))
+        log.debug("Calling %s to extract JD info", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000,
-            temperature=0.3,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         result = {
@@ -383,13 +430,16 @@ Resume:
 
 Respond in a structured format."""
 
-        log.debug("Calling OpenAI gpt-4o-mini to extract resume info")
+        model       = os.getenv("RESEARCHER_RESUME_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("RESEARCHER_RESUME_MAX_TOKENS",  "1000"))
+        temperature = float(os.getenv("RESEARCHER_RESUME_TEMPERATURE", "0.3"))
+        log.debug("Calling %s to extract resume info", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000,
-            temperature=0.3,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         result = {

@@ -57,11 +57,15 @@ class IntentRouter:
         return "SIMPLE_CHAT"
 
     async def simple_chat_response(
-        self, message: str, conversation_history: list = None
+        self,
+        message: str,
+        session_id: str,
+        retriever,
+        conversation_history: list = None,
     ) -> tuple[str, dict]:
-        """Generate a quick response without using agents."""
+        """Generate a response with context retrieved from the vector store."""
         history_len = len(conversation_history) if conversation_history else 0
-        log.info("simple_chat_response | history_messages=%d", history_len)
+        log.info("simple_chat_response | session_id=%s | history_messages=%d", session_id, history_len)
 
         system_prompt = (
             "You are Candi, a friendly AI interview preparation assistant. "
@@ -70,18 +74,27 @@ class IntentRouter:
             "Keep responses under 3 paragraphs unless asked for detail."
         )
 
+        # Retrieve context from vector store
+        context = retriever.get_context(session_id, message, top_k=5)
+        if context:
+            log.debug("Retrieved context from vector store | context_length=%d", len(context))
+            system_prompt += f"\n\n{context}"
+
         messages = [{"role": "system", "content": system_prompt}]
         if conversation_history:
             messages.extend(conversation_history[-10:])
         messages.append({"role": "user", "content": message})
 
-        log.debug("Calling OpenAI gpt-4o-mini for simple chat (%d total messages)", len(messages))
+        model       = os.getenv("ROUTER_SIMPLE_CHAT_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("ROUTER_SIMPLE_CHAT_MAX_TOKENS",  "500"))
+        temperature = float(os.getenv("ROUTER_SIMPLE_CHAT_TEMPERATURE", "0.7"))
+        log.debug("Calling %s for simple chat (%d total messages)", model, len(messages))
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=messages,
-            max_tokens=500,
-            temperature=0.7,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         reply = response.choices[0].message.content
@@ -91,41 +104,62 @@ class IntentRouter:
     async def quick_question_response(
         self,
         message: str,
+        session_id: str,
+        retriever,
         resume_text: str = "",
         jd_text: str = "",
         prep_context: dict = None,
+        conversation_history: list = None,
     ) -> tuple[str, dict]:
-        """Answer a specific question using the uploaded documents as context."""
+        """Answer a question with context from the vector store and uploaded docs."""
+        history_len = len(conversation_history) if conversation_history else 0
         log.info(
-            "quick_question_response | has_resume=%s has_jd=%s has_prep_context=%s",
-            bool(resume_text), bool(jd_text), bool(prep_context),
+            "quick_question_response | session_id=%s | has_resume=%s has_jd=%s has_prep_context=%s | history_messages=%d",
+            session_id, bool(resume_text), bool(jd_text), bool(prep_context), history_len,
         )
 
         system_prompt = (
             "You are Candi, an AI interview preparation assistant. "
-            "The user has uploaded their resume and job description. Answer their question based on this context. "
-            "Be specific, actionable, and concise. Reference specific details from their documents when relevant."
+            "The candidate's resume and job description are provided below — use them as your primary source of truth.\n\n"
+            "RULES:\n"
+            "- NEVER use placeholder text like [Project Name], [Company Name], [specific outcome], or [X%].\n"
+            "- ALWAYS use the candidate's real project names, companies, technologies, and metrics from their resume.\n"
+            "- When showing how to answer a question, write the full sample answer as if the candidate is speaking, "
+            "using their actual experience. Do not leave anything for them to fill in.\n"
+            "- If the resume lacks a specific detail, say so honestly — do not invent placeholders."
         )
 
-        context = (
-            f"## Resume Summary:\n{resume_text[:2000] if resume_text else 'Not provided'}\n\n"
-            f"## Job Description Summary:\n{jd_text[:2000] if jd_text else 'Not provided'}\n"
-        )
-        if prep_context:
-            context += f"\n## Previous Preparation Notes:\n{str(prep_context)[:1000]}"
+        # Always inject full resume + JD so the LLM has real details to reference
+        if resume_text:
+            system_prompt += f"\n\n## Candidate Resume:\n{resume_text[:4000]}"
+        if jd_text:
+            system_prompt += f"\n\n## Job Description:\n{jd_text[:2000]}"
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {message}"},
-        ]
+        # Pull supplementary context from vector store (prep guide, rounds, strategy, etc.)
+        vs_context = retriever.get_context(session_id, message, top_k=5)
+        if vs_context:
+            log.debug("Retrieved supplementary context from vector store | context_length=%d", len(vs_context))
+            system_prompt += f"\n\n## Prep Guide Context (use to supplement the answer):\n{vs_context}"
+        elif prep_context:
+            log.debug("No vector store context | appending prep_context dict as fallback")
+            system_prompt += f"\n\n## Previous Preparation Notes:\n{str(prep_context)[:1000]}"
 
-        log.debug("Calling OpenAI gpt-4o-mini for quick question (%d messages)", len(messages))
+        messages = [{"role": "system", "content": system_prompt}]
+        # Include recent conversation so follow-up questions have full context
+        if conversation_history:
+            messages.extend(conversation_history[-10:])
+        messages.append({"role": "user", "content": message})
+
+        model       = os.getenv("ROUTER_QUICK_QA_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("ROUTER_QUICK_QA_MAX_TOKENS",  "1200"))
+        temperature = float(os.getenv("ROUTER_QUICK_QA_TEMPERATURE", "0.7"))
+        log.debug("Calling %s for quick question (%d total messages)", model, len(messages))
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=messages,
-            max_tokens=800,
-            temperature=0.7,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         reply = response.choices[0].message.content

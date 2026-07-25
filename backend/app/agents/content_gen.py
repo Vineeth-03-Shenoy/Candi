@@ -111,13 +111,16 @@ For each question, provide:
 
 Generate 5-8 questions relevant to this round type."""
 
-        log.debug("Calling OpenAI gpt-4o for round question generation")
+        model       = os.getenv("CONTENT_ROUND_QUESTIONS_MODEL",       "gpt-4o")
+        max_tokens  = int(os.getenv("CONTENT_ROUND_QUESTIONS_MAX_TOKENS",  "2000"))
+        temperature = float(os.getenv("CONTENT_ROUND_QUESTIONS_TEMPERATURE", "0.7"))
+        log.debug("Calling %s for round question generation", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.7,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         result = response.choices[0].message.content
@@ -159,13 +162,16 @@ Instructions:
 - Organise clearly by round.
 - Be thorough and specific to this role and company."""
 
-        log.debug("Calling OpenAI gpt-4o for comprehensive question generation")
+        model       = os.getenv("CONTENT_ALL_QUESTIONS_MODEL",       "gpt-4o")
+        max_tokens  = int(os.getenv("CONTENT_ALL_QUESTIONS_MAX_TOKENS",  "4000"))
+        temperature = float(os.getenv("CONTENT_ALL_QUESTIONS_TEMPERATURE", "0.7"))
+        log.debug("Calling %s for comprehensive question generation", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=4000,
-            temperature=0.7,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         result = response.choices[0].message.content
@@ -199,13 +205,16 @@ Generate 8 behavioral questions using the STAR method:
 
 Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Learning."""
 
-        log.debug("Calling OpenAI gpt-4o-mini for behavioral question generation")
+        model       = os.getenv("CONTENT_BEHAVIORAL_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("CONTENT_BEHAVIORAL_MAX_TOKENS",  "1500"))
+        temperature = float(os.getenv("CONTENT_BEHAVIORAL_TEMPERATURE", "0.7"))
+        log.debug("Calling %s for behavioral question generation", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1500,
-            temperature=0.7,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         result = response.choices[0].message.content
@@ -243,13 +252,16 @@ Instructions:
 - Add 1 "gotcha" question per skill that interviewers commonly use to trip candidates.
 - Be technically precise."""
 
-        log.debug("Calling OpenAI gpt-4o for technical deep dive generation")
+        model       = os.getenv("CONTENT_TECHNICAL_MODEL",       "gpt-4o")
+        max_tokens  = int(os.getenv("CONTENT_TECHNICAL_MAX_TOKENS",  "3000"))
+        temperature = float(os.getenv("CONTENT_TECHNICAL_TEMPERATURE", "0.5"))
+        log.debug("Calling %s for technical deep dive generation", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=3000,
-            temperature=0.5,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         result = response.choices[0].message.content

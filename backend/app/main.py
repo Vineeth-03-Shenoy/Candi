@@ -15,7 +15,9 @@ from app.agents.router import IntentRouter
 from app.agents.researcher import ResearchAgent
 from app.agents.strategist import StrategistAgent
 from app.agents.content_gen import ContentGenAgent
+from app.agents.retriever import RetrieverAgent
 from app.services.pdf_generator import PDFGenerator
+from app.services.vector_store import VectorStore
 from app.utils.logger import get_logger
 from app.utils import pii_masker
 
@@ -38,11 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-router     = IntentRouter()
-researcher = ResearchAgent()
-strategist = StrategistAgent()
-content_gen = ContentGenAgent()
-pdf_gen    = PDFGenerator()
+router       = IntentRouter()
+researcher   = ResearchAgent()
+strategist   = StrategistAgent()
+content_gen  = ContentGenAgent()
+pdf_gen      = PDFGenerator()
+vector_store = VectorStore()
+retriever    = RetrieverAgent(vector_store)
 
 sessions: dict = {}
 
@@ -197,14 +201,19 @@ async def chat(request: ChatMessage):
             log.debug("Handling QUICK_QUESTION | session_id='%s'", request.session_id)
             reply, tokens = await router.quick_question_response(
                 safe_message,
+                session_id=request.session_id,
+                retriever=retriever,
                 resume_text=session.get("resume_text", ""),
                 jd_text=session.get("jd_text", ""),
                 prep_context=session.get("prep_data"),
+                conversation_history=session.get("messages", []),
             )
         else:  # SIMPLE_CHAT
             log.debug("Handling SIMPLE_CHAT | session_id='%s'", request.session_id)
             reply, tokens = await router.simple_chat_response(
                 safe_message,
+                session_id=request.session_id,
+                retriever=retriever,
                 conversation_history=session.get("messages", []),
             )
 
@@ -280,6 +289,22 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
         company_name, role_name = researcher._extract_company_role(jd_analysis.get("jd_analysis", ""))
         skills = researcher._extract_skills_from_jd(jd_analysis.get("jd_analysis", ""))
 
+        # Store resume in vector store.
+        # We store the LLM's structured analysis (which has **Section** headers matching
+        # the chunking strategy) instead of the raw resume text, which has no such headers.
+        log.debug("Storing resume analysis in vector store | session_id='%s'", session_id)
+        vector_store.store_chunks(
+            session_id, "resume",
+            resume_analysis.get("resume_analysis", masked_resume),
+            role=role_name, company=company_name,
+        )
+        log.debug("Storing JD analysis in vector store | session_id='%s'", session_id)
+        vector_store.store_chunks(
+            session_id, "jd",
+            jd_analysis.get("jd_analysis", masked_jd),
+            role=role_name, company=company_name,
+        )
+
         # ── Step 3: Parallel web research ──
         log.info(
             "Pipeline step 3/7 — parallel web research | company='%s' | role='%s' | session_id='%s'",
@@ -299,6 +324,14 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
             len(technical_qa), session_id,
         )
 
+        # Store company research in vector store
+        log.debug("Storing company research in vector store | session_id='%s'", session_id)
+        vector_store.store_chunks(
+            session_id, "company_research",
+            company_research.get("research_summary", ""),
+            role=role_name, company=company_name,
+        )
+
         # ── Step 4: Identify rounds ──
         log.info("Pipeline step 4/7 — round identification | session_id='%s'", session_id)
         yield f"data: {json.dumps({'step': 4, 'status': 'active', 'message': 'Identifying likely interview rounds...'})}\n\n"
@@ -310,6 +343,14 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
             rounds.get("estimated_rounds"), session_id,
         )
 
+        # Store rounds in vector store
+        log.debug("Storing rounds in vector store | session_id='%s'", session_id)
+        vector_store.store_chunks(
+            session_id, "rounds",
+            rounds.get("rounds_breakdown", ""),
+            role=role_name, company=company_name,
+        )
+
         # ── Step 5: Preparation strategy ──
         log.info("Pipeline step 5/7 — preparation strategy | session_id='%s'", session_id)
         yield f"data: {json.dumps({'step': 5, 'status': 'active', 'message': 'Creating preparation strategy...'})}\n\n"
@@ -317,6 +358,14 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
         _add_tokens(session, strategy.get("_tokens"))
         yield f"data: {json.dumps({'step': 5, 'status': 'complete', 'message': 'Strategy created'})}\n\n"
         log.info("Pipeline step 5/7 complete | session_id='%s'", session_id)
+
+        # Store strategy in vector store
+        log.debug("Storing strategy in vector store | session_id='%s'", session_id)
+        vector_store.store_chunks(
+            session_id, "strategy",
+            strategy.get("preparation_strategy", ""),
+            role=role_name, company=company_name,
+        )
 
         # ── Step 6: Parallel question generation ──
         log.info("Pipeline step 6/7 — parallel question generation | session_id='%s'", session_id)
@@ -342,6 +391,24 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
         _add_tokens(session, technical.get("_tokens"))
         yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Questions generated'})}\n\n"
         log.info("Pipeline step 6/7 complete | session_id='%s'", session_id)
+
+        # Store all question types in vector store
+        log.debug("Storing questions in vector store | session_id='%s'", session_id)
+        vector_store.store_chunks(
+            session_id, "questions",
+            questions.get("comprehensive_questions", ""),
+            role=role_name, company=company_name,
+        )
+        vector_store.store_chunks(
+            session_id, "behavioral",
+            behavioral.get("behavioral_questions", ""),
+            role=role_name, company=company_name,
+        )
+        vector_store.store_chunks(
+            session_id, "technical",
+            technical.get("technical_questions", ""),
+            role=role_name, company=company_name,
+        )
 
         # ── Step 7: PDF generation ──
         log.info("Pipeline step 7/7 — PDF generation | session_id='%s'", session_id)

@@ -39,13 +39,16 @@ For each round, provide:
 
 Return 4-6 likely rounds in order. Be specific to the role and company."""
 
-        log.debug("Calling OpenAI gpt-4o-mini to identify interview rounds")
+        model       = os.getenv("STRATEGIST_ROUNDS_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("STRATEGIST_ROUNDS_MAX_TOKENS",  "1200"))
+        temperature = float(os.getenv("STRATEGIST_ROUNDS_TEMPERATURE", "0.6"))
+        log.debug("Calling %s to identify interview rounds", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200,
-            temperature=0.6,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         rounds_text = response.choices[0].message.content
@@ -93,13 +96,16 @@ Determine:
 
 Be practical and actionable."""
 
-        log.debug("Calling OpenAI gpt-4o-mini for seniority analysis")
+        model       = os.getenv("STRATEGIST_SENIORITY_MODEL",       "gpt-4o-mini")
+        max_tokens  = int(os.getenv("STRATEGIST_SENIORITY_MAX_TOKENS",  "800"))
+        temperature = float(os.getenv("STRATEGIST_SENIORITY_TEMPERATURE", "0.5"))
+        log.debug("Calling %s for seniority analysis", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=800,
-            temperature=0.5,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         analysis_text = response.choices[0].message.content
@@ -143,13 +149,16 @@ Provide:
 
 Be specific and actionable for THIS candidate and THIS role."""
 
-        log.debug("Calling OpenAI gpt-4o to generate preparation strategy")
+        model       = os.getenv("STRATEGIST_STRATEGY_MODEL",       "gpt-4o")
+        max_tokens  = int(os.getenv("STRATEGIST_STRATEGY_MAX_TOKENS",  "1500"))
+        temperature = float(os.getenv("STRATEGIST_STRATEGY_TEMPERATURE", "0.7"))
+        log.debug("Calling %s to generate preparation strategy", model)
         response, tokens = llm_call(
             self.client, __name__,
-            model="gpt-4o",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1500,
-            temperature=0.7,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         strategy_text = response.choices[0].message.content
