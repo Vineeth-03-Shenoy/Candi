@@ -3,7 +3,6 @@ Research Agent - Deep research for interview experiences and company info
 """
 import json
 import os
-import re
 import asyncio
 from datetime import datetime
 from pathlib import Path
@@ -11,10 +10,11 @@ from urllib.parse import quote_plus
 
 import httpx
 from bs4 import BeautifulSoup
-from openai import OpenAI
+from openai import AsyncOpenAI
 
+from app.models.schemas import JDInfo, ResumeInfo
 from app.utils.logger import get_logger
-from app.utils.llm_logger import llm_call
+from app.utils.llm_logger import llm_call, llm_parse
 
 log = get_logger(__name__)
 
@@ -51,7 +51,7 @@ class ResearchAgent:
 
     def __init__(self):
         log.debug("Initialising ResearchAgent")
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.http_client = httpx.AsyncClient(
             timeout=20.0,
             follow_redirects=True,
@@ -136,62 +136,41 @@ class ResearchAgent:
             return ""
 
     # ------------------------------------------------------------------
-    # Parsing helpers (synchronous)
+    # Structured extraction renderers
     # ------------------------------------------------------------------
+    # These render structured LLM output back into the markdown format that
+    # downstream consumers (prompts, PDF generator, vector-store section
+    # chunking) already expect. No regex parsing of LLM text anywhere.
 
-    def _extract_company_role(self, jd_analysis_text: str) -> tuple[str, str]:
-        log.debug("Extracting company and role from JD analysis text")
-        company = "Target Company"
-        role    = "Software Engineer"
-
-        company_match = re.search(
-            r'\*\*Company Name\*\*[:\s]+([^\n*]+)', jd_analysis_text, re.IGNORECASE
+    @staticmethod
+    def _render_jd_analysis(info: JDInfo) -> str:
+        resp  = "\n".join(f"- {r}" for r in info.key_responsibilities) or "- Not specified"
+        focus = "\n".join(f"- {f}" for f in info.interview_focus_areas) or "- Not specified"
+        return (
+            f"1. **Company Name**: {info.company_name or 'Not mentioned'}\n"
+            f"2. **Role Title**: {info.role_title or 'Not mentioned'}\n"
+            f"3. **Experience Level**: {info.experience_level or 'Not specified'}\n"
+            f"4. **Required Skills**: {', '.join(info.required_skills) or 'Not specified'}\n"
+            f"5. **Nice-to-Have Skills**: {', '.join(info.nice_to_have_skills) or 'Not mentioned'}\n"
+            f"6. **Key Responsibilities**:\n{resp}\n"
+            f"7. **Interview Focus Areas**:\n{focus}"
         )
-        if company_match:
-            val = company_match.group(1).strip().strip("*").strip()
-            if val and val.lower() not in {
-                "not mentioned", "not specified", "n/a", "-", "not provided", ""
-            }:
-                company = val
 
-        role_match = re.search(
-            r'\*\*Role Title\*\*[:\s]+([^\n*]+)', jd_analysis_text, re.IGNORECASE
+    @staticmethod
+    def _render_resume_analysis(info: ResumeInfo) -> str:
+        projects   = "\n".join(f"- {p}" for p in info.key_projects) or "- Not specified"
+        strengths  = "\n".join(f"- {s}" for s in info.strengths_for_interviews) or "- Not specified"
+        gaps       = "\n".join(f"- {g}" for g in info.potential_gaps) or "- Not specified"
+        return (
+            f"1. **Candidate Name**: {info.candidate_name or 'Not mentioned'}\n"
+            f"2. **Experience Level**: {info.experience_level or 'Not specified'}\n"
+            f"3. **Current/Latest Role**: {info.current_role or 'Not mentioned'}\n"
+            f"4. **Top Skills**: {', '.join(info.top_skills) or 'Not specified'}\n"
+            f"5. **Key Projects**:\n{projects}\n"
+            f"6. **Education**: {info.education or 'Not mentioned'}\n"
+            f"7. **Strengths for Interviews**:\n{strengths}\n"
+            f"8. **Potential Gaps**:\n{gaps}"
         )
-        if role_match:
-            val = role_match.group(1).strip().strip("*").strip()
-            if val:
-                role = val
-
-        log.info("Extracted from JD | company='%s' | role='%s'", company, role)
-        return company, role
-
-    def _extract_skills_from_jd(self, jd_analysis_text: str) -> list[str]:
-        log.debug("Extracting required skills from JD analysis text")
-        match = re.search(
-            r'\*\*Required Skills\*\*[:\s]+(.*?)(?=\n\d+\.|\n\*\*|\Z)',
-            jd_analysis_text,
-            re.DOTALL | re.IGNORECASE,
-        )
-        if not match:
-            log.warning("Could not find Required Skills section in JD analysis")
-            return []
-
-        skills_text = match.group(1)
-        raw = re.findall(
-            r'[-•*\d.]\s*([A-Za-z][A-Za-z0-9\s+#./]+?)(?:[,\n]|$)', skills_text
-        )
-        cleaned = [s.strip().strip("*").strip() for s in raw if 2 < len(s.strip()) < 35]
-
-        seen: set[str] = set()
-        unique: list[str] = []
-        for s in cleaned:
-            if s.lower() not in seen:
-                seen.add(s.lower())
-                unique.append(s)
-        skills = unique[:6]
-
-        log.info("Extracted %d skills from JD: %s", len(skills), skills)
-        return skills
 
     # ------------------------------------------------------------------
     # Web research
@@ -256,7 +235,7 @@ Clearly note if specific data was limited."""
         max_tokens  = int(os.getenv("RESEARCHER_COMPANY_MAX_TOKENS",  "1200"))
         temperature = float(os.getenv("RESEARCHER_COMPANY_TEMPERATURE", "0.3"))
         log.debug("Calling %s to synthesise company research", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -376,79 +355,83 @@ Clearly note if specific data was limited."""
     async def extract_jd_info(self, jd_text: str) -> dict:
         log.info("Extracting JD info | jd_length=%d chars", len(jd_text))
 
-        prompt = f"""Analyze this job description and extract:
-
-1. **Company Name**: (if mentioned)
-2. **Role Title**:
-3. **Experience Level**: (Fresher/1-3 years/3-5 years/5+ years/Senior)
-4. **Required Skills**: (list the top 10)
-5. **Nice-to-Have Skills**: (list any mentioned)
-6. **Key Responsibilities**: (summarize in 5 points)
-7. **Interview Focus Areas**: (what they'll likely test based on requirements)
+        prompt = f"""Extract the structured fields from this job description.
+Use "" for unknown strings and [] for unknown lists — never invent data.
 
 Job Description:
-{jd_text[:3000]}
-
-Respond in a structured format."""
+{jd_text[:3000]}"""
 
         model       = os.getenv("RESEARCHER_JD_MODEL",       "gpt-4o-mini")
         max_tokens  = int(os.getenv("RESEARCHER_JD_MAX_TOKENS",  "1000"))
         temperature = float(os.getenv("RESEARCHER_JD_TEMPERATURE", "0.3"))
-        log.debug("Calling %s to extract JD info", model)
-        response, tokens = llm_call(
+        log.debug("Calling %s to extract JD info (structured)", model)
+        response, tokens = await llm_parse(
             self.client, __name__,
+            response_format=JDInfo,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
 
-        result = {
-            "jd_analysis": response.choices[0].message.content,
-            "raw_jd": jd_text[:1000],
-            "_tokens": tokens,
+        info = response.choices[0].message.parsed or JDInfo(
+            company_name="", role_title="", experience_level="",
+            required_skills=[], nice_to_have_skills=[],
+            key_responsibilities=[], interview_focus_areas=[],
+        )
+        log.info(
+            "JD info extracted | company='%s' | role='%s' | skills=%d",
+            info.company_name, info.role_title, len(info.required_skills),
+        )
+
+        return {
+            "jd_analysis": self._render_jd_analysis(info),
+            "jd_info":     info,
+            "raw_jd":      jd_text[:1000],
+            "_tokens":     tokens,
         }
-        log.info("JD info extracted | analysis_length=%d chars", len(result["jd_analysis"]))
-        return result
 
     async def extract_resume_info(self, resume_text: str) -> dict:
         log.info("Extracting resume info | resume_length=%d chars", len(resume_text))
 
-        prompt = f"""Analyze this resume and extract:
-
-1. **Candidate Name**: (if mentioned)
-2. **Experience Level**: (total years)
-3. **Current/Latest Role**:
-4. **Top Skills**: (list the main technical skills)
-5. **Key Projects**: (summarize 2-3 notable projects)
-6. **Education**:
-7. **Strengths for Interviews**: (what to highlight)
-8. **Potential Gaps**: (areas to prepare for tough questions)
+        prompt = f"""Extract the structured fields from this resume.
+Use "" for unknown strings and [] for unknown lists — never invent data.
 
 Resume:
-{resume_text[:3000]}
-
-Respond in a structured format."""
+{resume_text[:3000]}"""
 
         model       = os.getenv("RESEARCHER_RESUME_MODEL",       "gpt-4o-mini")
         max_tokens  = int(os.getenv("RESEARCHER_RESUME_MAX_TOKENS",  "1000"))
         temperature = float(os.getenv("RESEARCHER_RESUME_TEMPERATURE", "0.3"))
-        log.debug("Calling %s to extract resume info", model)
-        response, tokens = llm_call(
+        log.debug("Calling %s to extract resume info (structured)", model)
+        # This call intentionally receives the full unmasked resume (needed to
+        # extract the candidate name) — withhold it from the JSONL log.
+        response, tokens = await llm_parse(
             self.client, __name__,
+            response_format=ResumeInfo,
+            pii_masked=False,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
 
-        result = {
-            "resume_analysis": response.choices[0].message.content,
-            "raw_resume": resume_text[:1000],
-            "_tokens": tokens,
+        info = response.choices[0].message.parsed or ResumeInfo(
+            candidate_name="", experience_level="", current_role="",
+            top_skills=[], key_projects=[], education="",
+            strengths_for_interviews=[], potential_gaps=[],
+        )
+        log.info(
+            "Resume info extracted | name_found=%s | top_skills=%d",
+            bool(info.candidate_name), len(info.top_skills),
+        )
+
+        return {
+            "resume_analysis": self._render_resume_analysis(info),
+            "resume_info":     info,
+            "raw_resume":      resume_text[:1000],
+            "_tokens":         tokens,
         }
-        log.info("Resume info extracted | analysis_length=%d chars", len(result["resume_analysis"]))
-        return result
 
     async def close(self):
         log.debug("Closing ResearchAgent HTTP client")

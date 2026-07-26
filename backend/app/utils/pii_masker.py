@@ -127,8 +127,8 @@ def mask_resume(text: str, candidate_name: str | None = None) -> str:
     )
 
     if emails_found:
-        log.info("PII emails found in resume: %s",
-                 [e if isinstance(e, str) else e[0] for e in emails_found])
+        # Never log the actual addresses — counts only
+        log.info("PII emails found in resume | count=%d", len(emails_found))
 
     # Log masked resume preview (first 600 chars) so the redacted output is visible in the log
     preview = masked[:600].replace("\n", " ").strip()

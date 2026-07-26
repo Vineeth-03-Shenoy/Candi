@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 from dotenv import load_dotenv
 import os
+import re
 import json
 import asyncio
 import io
@@ -267,10 +268,11 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
         yield f"data: {json.dumps({'step': 1, 'status': 'complete', 'message': 'Resume analyzed'})}\n\n"
         log.info("Pipeline step 1/7 complete | session_id='%s'", session_id)
 
-        # Extract candidate name, then create PII-masked copies for all future prompts
-        candidate_name = pii_masker.extract_name_from_analysis(
-            resume_analysis.get("resume_analysis", "")
-        )
+        # Extract candidate name (structured field), then create PII-masked
+        # copies for all future prompts
+        candidate_name = resume_analysis.get("resume_info").candidate_name or None
+        if candidate_name:
+            candidate_name = candidate_name.strip() or None
         masked_resume = pii_masker.mask_resume(resume_text, candidate_name=candidate_name)
         masked_jd     = pii_masker.mask_pii(jd_text)
         log.info(
@@ -286,8 +288,14 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
         yield f"data: {json.dumps({'step': 2, 'status': 'complete', 'message': 'Job description analyzed'})}\n\n"
         log.info("Pipeline step 2/7 complete | session_id='%s'", session_id)
 
-        company_name, role_name = researcher._extract_company_role(jd_analysis.get("jd_analysis", ""))
-        skills = researcher._extract_skills_from_jd(jd_analysis.get("jd_analysis", ""))
+        jd_info      = jd_analysis["jd_info"]
+        company_name = jd_info.company_name.strip() or "Target Company"
+        role_name    = jd_info.role_title.strip()    or "Software Engineer"
+        skills       = jd_info.required_skills[:6]
+        log.info(
+            "JD structured fields | company='%s' | role='%s' | skills=%s",
+            company_name, role_name, skills,
+        )
 
         # Store resume in vector store.
         # We store the LLM's structured analysis (which has **Section** headers matching
@@ -494,17 +502,30 @@ async def prepare_interview(request: PrepareRequest):
 
 @app.get("/api/download/{filename}")
 async def download_pdf(filename: str):
-    """Download the generated PDF."""
+    """Download the generated PDF. Filename is strictly validated (path-traversal safe)."""
     log.info("GET /api/download | filename='%s'", filename)
-    output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
-    filepath   = os.path.join(output_dir, filename)
+
+    # Strip any directory components, then enforce an allowlist pattern
+    # (matches exactly what PDFGenerator produces: Interview_Prep_<Company>_<ts>.pdf)
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or not re.fullmatch(r"[\w\-. ]+\.pdf", safe_name):
+        log.warning("Rejected unsafe download filename | filename='%s'", filename)
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    output_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "output"))
+    filepath   = os.path.realpath(os.path.join(output_dir, safe_name))
+
+    # Belt-and-braces: resolved path must stay inside output_dir
+    if os.path.dirname(filepath) != output_dir:
+        log.warning("Path traversal attempt blocked | filename='%s'", filename)
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     if not os.path.exists(filepath):
-        log.warning("PDF not found | filename='%s'", filename)
+        log.warning("PDF not found | filename='%s'", safe_name)
         raise HTTPException(status_code=404, detail="PDF not found")
 
-    log.info("Serving PDF | filename='%s'", filename)
-    return FileResponse(filepath, media_type="application/pdf", filename=filename)
+    log.info("Serving PDF | filename='%s'", safe_name)
+    return FileResponse(filepath, media_type="application/pdf", filename=safe_name)
 
 
 @app.get("/api/session/{session_id}")

@@ -3,7 +3,7 @@ Content Generator Agent - Generates interview questions and answers
 grounded in real company research and technical Q&A from trusted sources.
 """
 import os
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
@@ -25,7 +25,7 @@ def _sum_tokens(*token_dicts: dict) -> dict:
 class ContentGenAgent:
     def __init__(self):
         log.debug("Initialising ContentGenAgent")
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -115,7 +115,7 @@ Generate 5-8 questions relevant to this round type."""
         max_tokens  = int(os.getenv("CONTENT_ROUND_QUESTIONS_MAX_TOKENS",  "2000"))
         temperature = float(os.getenv("CONTENT_ROUND_QUESTIONS_TEMPERATURE", "0.7"))
         log.debug("Calling %s for round question generation", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -166,7 +166,7 @@ Instructions:
         max_tokens  = int(os.getenv("CONTENT_ALL_QUESTIONS_MAX_TOKENS",  "4000"))
         temperature = float(os.getenv("CONTENT_ALL_QUESTIONS_TEMPERATURE", "0.7"))
         log.debug("Calling %s for comprehensive question generation", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -209,7 +209,7 @@ Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Le
         max_tokens  = int(os.getenv("CONTENT_BEHAVIORAL_MAX_TOKENS",  "1500"))
         temperature = float(os.getenv("CONTENT_BEHAVIORAL_TEMPERATURE", "0.7"))
         log.debug("Calling %s for behavioral question generation", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -256,7 +256,7 @@ Instructions:
         max_tokens  = int(os.getenv("CONTENT_TECHNICAL_MAX_TOKENS",  "3000"))
         temperature = float(os.getenv("CONTENT_TECHNICAL_TEMPERATURE", "0.5"))
         log.debug("Calling %s for technical deep dive generation", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],

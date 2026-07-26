@@ -3,8 +3,8 @@ LLM Interaction Logger
 
 Wraps every OpenAI API call to capture and persist:
   - Model used
-  - Full input messages
-  - Full output text
+  - Input messages (PII-sanitised; withheld entirely for unmasked calls)
+  - Output text (PII-sanitised)
   - Token counts (prompt / completion / total)
   - Time taken
   - Call settings (temperature, max_tokens, etc.)
@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app.utils import pii_masker
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -49,34 +50,27 @@ def _write_llm_log(entry: dict) -> None:
         log.warning("Failed to write LLM interaction log | error=%s", exc)
 
 
-def llm_call(client: Any, module_name: str, **kwargs) -> tuple[Any, dict]:
-    """
-    Drop-in replacement for client.chat.completions.create().
+def _sanitize_messages(messages: list) -> list:
+    """Return a copy of the messages with email/phone PII masked for logging."""
+    sanitized = []
+    for msg in messages:
+        if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+            sanitized.append({**msg, "content": pii_masker.mask_pii(msg["content"])})
+        else:
+            sanitized.append(msg)
+    return sanitized
 
-    Usage:
-        response, tokens = llm_call(self.client, __name__,
-                                    model="gpt-4o-mini",
-                                    messages=[...],
-                                    temperature=0.7,
-                                    max_tokens=500)
 
-    Returns:
-        response   — the raw OpenAI response object
-        tokens     — dict with prompt_tokens, completion_tokens, total_tokens
-    """
-    model    = kwargs.get("model", "unknown")
-    messages = kwargs.get("messages", [])
-    settings = {k: v for k, v in kwargs.items() if k not in ("model", "messages")}
-
-    log.debug(
-        "LLM call starting | module=%s | model=%s | messages=%d | settings=%s",
-        module_name, model, len(messages), settings,
-    )
-
-    start    = time.perf_counter()
-    response = client.chat.completions.create(**kwargs)
-    elapsed  = round(time.perf_counter() - start, 3)
-
+def _finalize(
+    module_name: str,
+    model: str,
+    messages: list,
+    settings: dict,
+    response: Any,
+    elapsed: float,
+    pii_masked: bool,
+) -> tuple[Any, dict]:
+    """Shared post-call logic: token extraction, console log, JSONL persistence."""
     usage = response.usage
     tokens = {
         "prompt_tokens":     usage.prompt_tokens     if usage else 0,
@@ -92,13 +86,25 @@ def llm_call(client: Any, module_name: str, **kwargs) -> tuple[Any, dict]:
         tokens["prompt_tokens"], tokens["completion_tokens"], elapsed,
     )
 
+    # Never persist raw PII. Unmasked calls (e.g. the initial resume parse, which
+    # intentionally receives the full resume to extract the candidate name) have
+    # their content withheld entirely; masked calls are still defensively
+    # re-sanitised before hitting disk.
+    if pii_masked:
+        logged_input  = _sanitize_messages(messages)
+        logged_output = pii_masker.mask_pii(output_text or "")
+    else:
+        logged_input  = "[withheld — input contains unmasked PII]"
+        logged_output = "[withheld — output may contain unmasked PII]"
+
     entry = {
         "timestamp":           datetime.now().isoformat(),
         "module":              module_name,
         "model":               model,
         "settings":            settings,
-        "input_messages":      messages,
-        "output":              output_text,
+        "pii_masked":          pii_masked,
+        "input_messages":      logged_input,
+        "output":              logged_output,
         "input_tokens":        tokens["prompt_tokens"],
         "output_tokens":       tokens["completion_tokens"],
         "total_tokens":        tokens["total_tokens"],
@@ -107,3 +113,80 @@ def llm_call(client: Any, module_name: str, **kwargs) -> tuple[Any, dict]:
     _write_llm_log(entry)
 
     return response, tokens
+
+
+async def llm_call(
+    client: Any,
+    module_name: str,
+    pii_masked: bool = True,
+    **kwargs,
+) -> tuple[Any, dict]:
+    """
+    Async drop-in replacement for client.chat.completions.create().
+
+    Usage:
+        response, tokens = await llm_call(self.client, __name__,
+                                          model="gpt-4o-mini",
+                                          messages=[...],
+                                          temperature=0.7,
+                                          max_tokens=500)
+
+    Args:
+        pii_masked — set False when the input intentionally contains unmasked
+                     PII (e.g. the initial resume parse); the JSONL log then
+                     withholds the content instead of persisting it.
+
+    Returns:
+        response   — the raw OpenAI response object
+        tokens     — dict with prompt_tokens, completion_tokens, total_tokens
+    """
+    model    = kwargs.get("model", "unknown")
+    messages = kwargs.get("messages", [])
+    settings = {k: v for k, v in kwargs.items() if k not in ("model", "messages")}
+
+    log.debug(
+        "LLM call starting | module=%s | model=%s | messages=%d | settings=%s",
+        module_name, model, len(messages), settings,
+    )
+
+    start    = time.perf_counter()
+    response = await client.chat.completions.create(**kwargs)
+    elapsed  = round(time.perf_counter() - start, 3)
+
+    return _finalize(module_name, model, messages, settings, response, elapsed, pii_masked)
+
+
+async def llm_parse(
+    client: Any,
+    module_name: str,
+    response_format: Any,
+    pii_masked: bool = True,
+    **kwargs,
+) -> tuple[Any, dict]:
+    """
+    Structured Outputs variant of llm_call — uses chat.completions.parse() so the
+    response is validated against a Pydantic model (response.choices[0].message.parsed).
+
+    Usage:
+        response, tokens = await llm_parse(self.client, __name__,
+                                           response_format=JDInfo,
+                                           model="gpt-4o-mini",
+                                           messages=[...])
+    """
+    model    = kwargs.get("model", "unknown")
+    messages = kwargs.get("messages", [])
+    settings = {k: v for k, v in kwargs.items() if k not in ("model", "messages")}
+    settings["response_format"] = getattr(response_format, "__name__", str(response_format))
+
+    log.debug(
+        "LLM parse starting | module=%s | model=%s | schema=%s | messages=%d",
+        module_name, model, settings["response_format"], len(messages),
+    )
+
+    start    = time.perf_counter()
+    response = await client.chat.completions.parse(
+        response_format=response_format, **kwargs
+    )
+    elapsed  = round(time.perf_counter() - start, 3)
+
+    return _finalize(module_name, model, messages, settings, response, elapsed, pii_masked)

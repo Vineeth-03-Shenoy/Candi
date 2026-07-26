@@ -3,7 +3,7 @@ Strategist Agent - Determines interview rounds and preparation strategy
 """
 import os
 import re
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
@@ -14,7 +14,7 @@ log = get_logger(__name__)
 class StrategistAgent:
     def __init__(self):
         log.debug("Initialising StrategistAgent")
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     async def identify_rounds(self, jd_analysis: dict, company_research: dict) -> dict:
         company = company_research.get("company_name", "the company")
@@ -43,7 +43,7 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         max_tokens  = int(os.getenv("STRATEGIST_ROUNDS_MAX_TOKENS",  "1200"))
         temperature = float(os.getenv("STRATEGIST_ROUNDS_TEMPERATURE", "0.6"))
         log.debug("Calling %s to identify interview rounds", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -69,7 +69,8 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         matches = re.findall(
             r'(?:Round|Stage|Interview)\s*\d+|^\d+\.', text, re.MULTILINE | re.IGNORECASE
         )
-        count = max(len(matches), 4)
+        # Report the actual count found; only fall back to 4 when nothing matched
+        count = len(matches) if matches else 4
         log.debug("Round count heuristic | regex_matches=%d | final_count=%d", len(matches), count)
         return count
 
@@ -100,7 +101,7 @@ Be practical and actionable."""
         max_tokens  = int(os.getenv("STRATEGIST_SENIORITY_MAX_TOKENS",  "800"))
         temperature = float(os.getenv("STRATEGIST_SENIORITY_TEMPERATURE", "0.5"))
         log.debug("Calling %s for seniority analysis", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -153,7 +154,7 @@ Be specific and actionable for THIS candidate and THIS role."""
         max_tokens  = int(os.getenv("STRATEGIST_STRATEGY_MAX_TOKENS",  "1500"))
         temperature = float(os.getenv("STRATEGIST_STRATEGY_TEMPERATURE", "0.7"))
         log.debug("Calling %s to generate preparation strategy", model)
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],

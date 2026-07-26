@@ -7,7 +7,7 @@ Routes messages to either:
 3. QUICK_QUESTION - Uses context from previous prep but answers quickly
 """
 import os
-from openai import OpenAI
+from openai import AsyncOpenAI
 from typing import Literal
 
 from app.utils.logger import get_logger
@@ -21,7 +21,7 @@ IntentType = Literal["SIMPLE_CHAT", "FULL_PREPARATION", "QUICK_QUESTION"]
 class IntentRouter:
     def __init__(self):
         log.debug("Initialising IntentRouter")
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     def classify_intent(
         self, message: str, has_resume: bool = False, has_jd: bool = False
@@ -89,7 +89,7 @@ class IntentRouter:
         max_tokens  = int(os.getenv("ROUTER_SIMPLE_CHAT_MAX_TOKENS",  "500"))
         temperature = float(os.getenv("ROUTER_SIMPLE_CHAT_TEMPERATURE", "0.7"))
         log.debug("Calling %s for simple chat (%d total messages)", model, len(messages))
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=messages,
@@ -154,7 +154,7 @@ class IntentRouter:
         max_tokens  = int(os.getenv("ROUTER_QUICK_QA_MAX_TOKENS",  "1200"))
         temperature = float(os.getenv("ROUTER_QUICK_QA_TEMPERATURE", "0.7"))
         log.debug("Calling %s for quick question (%d total messages)", model, len(messages))
-        response, tokens = llm_call(
+        response, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=messages,

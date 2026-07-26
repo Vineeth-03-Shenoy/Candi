@@ -44,3 +44,6 @@ pip-log.txt
 
 # Turbopack cache
 .turbo/
+
+# Local-only planning docs (not for the public repo)
+ARCHITECTURE_REVIEW.md

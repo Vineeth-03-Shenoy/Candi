@@ -85,7 +85,9 @@ class PDFGenerator:
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename  = f"Interview_Prep_{company_name.replace(' ', '_')}_{timestamp}.pdf"
+        # Keep the filename within the download endpoint's allowlist ([\w\-. ]+\.pdf)
+        safe_company = re.sub(r"[^\w\-. ]", "", company_name).replace(" ", "_") or "Company"
+        filename  = f"Interview_Prep_{safe_company}_{timestamp}.pdf"
         filepath  = os.path.join(self.output_dir, filename)
         log.debug("PDF output path: %s", filepath)
 
