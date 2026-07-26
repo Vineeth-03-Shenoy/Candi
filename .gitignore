@@ -36,6 +36,7 @@ backend/output/
 npm-debug.log*
 backend/Logs/
 backend/chroma_db/
+backend/candi_sessions.db
 
 # Python
 *.egg-info/

@@ -1,9 +1,10 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-from dotenv import load_dotenv
 import os
 import re
 import json
@@ -12,25 +13,47 @@ import io
 
 from PyPDF2 import PdfReader
 
+from app.config import settings
 from app.agents.router import IntentRouter
 from app.agents.researcher import ResearchAgent
 from app.agents.strategist import StrategistAgent
 from app.agents.content_gen import ContentGenAgent
 from app.agents.retriever import RetrieverAgent
 from app.services.pdf_generator import PDFGenerator
+from app.services.session_store import SessionStore
 from app.services.vector_store import VectorStore
 from app.utils.logger import get_logger
 from app.utils import pii_masker
 
-load_dotenv()
-
 log = get_logger(__name__)
 log.info("Starting Candi API")
+
+router       = IntentRouter()
+researcher   = ResearchAgent()
+strategist   = StrategistAgent()
+content_gen  = ContentGenAgent()
+pdf_gen      = PDFGenerator()
+vector_store = VectorStore()
+retriever    = RetrieverAgent(vector_store)
+session_store = SessionStore()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: reap sessions older than the TTL, plus their Chroma collections."""
+    expired = session_store.cleanup_expired(settings.session_ttl_days * 86400)
+    for sid in expired:
+        vector_store.delete_session(sid)
+    if expired:
+        log.info("Startup cleanup complete | expired_sessions=%d", len(expired))
+    yield
+
 
 app = FastAPI(
     title="Candi - Interview Helper API",
     description="Agentic backend for interview preparation",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -40,17 +63,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-router       = IntentRouter()
-researcher   = ResearchAgent()
-strategist   = StrategistAgent()
-content_gen  = ContentGenAgent()
-pdf_gen      = PDFGenerator()
-vector_store = VectorStore()
-retriever    = RetrieverAgent(vector_store)
-
-sessions: dict = {}
-
 
 # ------------------------------------------------------------------
 # Helpers
@@ -106,7 +118,9 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    api_key_set = bool(os.getenv("OPENAI_API_KEY"))
+    # The app refuses to start without a key (see app/config.py), so this
+    # is always true at runtime — kept for frontend compatibility.
+    api_key_set = bool(settings.openai_api_key)
     log.info("GET /health | api_key_set=%s", api_key_set)
     return {"status": "healthy", "api_key_set": api_key_set}
 
@@ -163,7 +177,7 @@ async def chat(request: ChatMessage):
     )
 
     try:
-        session = sessions.get(request.session_id, {})
+        session = session_store.get(request.session_id) or {}
         session.setdefault("messages",    [])
         session.setdefault("resume_text", "")
         session.setdefault("jd_text",     "")
@@ -189,7 +203,7 @@ async def chat(request: ChatMessage):
 
         if intent == "FULL_PREPARATION":
             log.info("Chat redirecting to full preparation | session_id='%s'", request.session_id)
-            sessions[request.session_id] = session
+            session_store.save(request.session_id, session)
             return {
                 "response": "I'll start preparing your comprehensive interview guide. This will take a moment as I research and generate personalized content...",
                 "intent": intent,
@@ -222,7 +236,7 @@ async def chat(request: ChatMessage):
 
         session["messages"].append({"role": "user",      "content": request.message})
         session["messages"].append({"role": "assistant", "content": reply})
-        sessions[request.session_id] = session
+        session_store.save(request.session_id, session)
 
         log.info(
             "Chat response sent | session_id='%s' | intent=%s | reply_length=%d | session_total_tokens=%d",
@@ -255,7 +269,7 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
     )
 
     # Session token accumulator for this pipeline run
-    session = sessions.get(session_id, {})
+    session = session_store.get(session_id) or {}
     session.setdefault("messages",    [])
     session.setdefault("token_usage", _blank_tokens())
 
@@ -447,7 +461,7 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
             "questions":       questions,
         }
         session["pdf_path"] = pdf_path
-        sessions[session_id] = session
+        session_store.save(session_id, session)
 
         total_tokens = session["token_usage"]["total_tokens"]
         log.info(
@@ -532,7 +546,7 @@ async def download_pdf(filename: str):
 async def get_session(session_id: str):
     """Get session state."""
     log.debug("GET /api/session | session_id='%s'", session_id)
-    session = sessions.get(session_id)
+    session = session_store.get(session_id)
     if not session:
         log.debug("Session not found | session_id='%s'", session_id)
         return {"exists": False}
@@ -548,3 +562,12 @@ async def get_session(session_id: str):
     log.debug("Session state | session_id='%s' | total_tokens=%d",
               session_id, result["token_usage"]["total_tokens"])
     return result
+
+
+@app.delete("/api/session/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session and its Chroma vector-store collection."""
+    log.info("DELETE /api/session | session_id='%s'", session_id)
+    existed = session_store.delete(session_id)
+    vector_store.delete_session(session_id)
+    return {"deleted": True, "existed": existed}

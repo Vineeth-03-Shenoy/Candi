@@ -2,7 +2,6 @@
 Research Agent - Deep research for interview experiences and company info
 """
 import json
-import os
 import asyncio
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +11,7 @@ import httpx
 from bs4 import BeautifulSoup
 from openai import AsyncOpenAI
 
+from app.config import settings
 from app.models.schemas import JDInfo, ResumeInfo
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call, llm_parse
@@ -51,7 +51,7 @@ class ResearchAgent:
 
     def __init__(self):
         log.debug("Initialising ResearchAgent")
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
         self.http_client = httpx.AsyncClient(
             timeout=20.0,
             follow_redirects=True,
@@ -231,9 +231,9 @@ Based on this data (supplement gaps with general patterns for this type of compa
 
 Clearly note if specific data was limited."""
 
-        model       = os.getenv("RESEARCHER_COMPANY_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("RESEARCHER_COMPANY_MAX_TOKENS",  "1200"))
-        temperature = float(os.getenv("RESEARCHER_COMPANY_TEMPERATURE", "0.3"))
+        model       = settings.researcher_company_model
+        max_tokens  = settings.researcher_company_max_tokens
+        temperature = settings.researcher_company_temperature
         log.debug("Calling %s to synthesise company research", model)
         response, tokens = await llm_call(
             self.client, __name__,
@@ -361,9 +361,9 @@ Use "" for unknown strings and [] for unknown lists — never invent data.
 Job Description:
 {jd_text[:3000]}"""
 
-        model       = os.getenv("RESEARCHER_JD_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("RESEARCHER_JD_MAX_TOKENS",  "1000"))
-        temperature = float(os.getenv("RESEARCHER_JD_TEMPERATURE", "0.3"))
+        model       = settings.researcher_jd_model
+        max_tokens  = settings.researcher_jd_max_tokens
+        temperature = settings.researcher_jd_temperature
         log.debug("Calling %s to extract JD info (structured)", model)
         response, tokens = await llm_parse(
             self.client, __name__,
@@ -400,9 +400,9 @@ Use "" for unknown strings and [] for unknown lists — never invent data.
 Resume:
 {resume_text[:3000]}"""
 
-        model       = os.getenv("RESEARCHER_RESUME_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("RESEARCHER_RESUME_MAX_TOKENS",  "1000"))
-        temperature = float(os.getenv("RESEARCHER_RESUME_TEMPERATURE", "0.3"))
+        model       = settings.researcher_resume_model
+        max_tokens  = settings.researcher_resume_max_tokens
+        temperature = settings.researcher_resume_temperature
         log.debug("Calling %s to extract resume info (structured)", model)
         # This call intentionally receives the full unmasked resume (needed to
         # extract the candidate name) — withhold it from the JSONL log.

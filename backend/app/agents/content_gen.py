@@ -2,9 +2,9 @@
 Content Generator Agent - Generates interview questions and answers
 grounded in real company research and technical Q&A from trusted sources.
 """
-import os
 from openai import AsyncOpenAI
 
+from app.config import settings
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
 
@@ -25,7 +25,7 @@ def _sum_tokens(*token_dicts: dict) -> dict:
 class ContentGenAgent:
     def __init__(self):
         log.debug("Initialising ContentGenAgent")
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -111,9 +111,9 @@ For each question, provide:
 
 Generate 5-8 questions relevant to this round type."""
 
-        model       = os.getenv("CONTENT_ROUND_QUESTIONS_MODEL",       "gpt-4o")
-        max_tokens  = int(os.getenv("CONTENT_ROUND_QUESTIONS_MAX_TOKENS",  "2000"))
-        temperature = float(os.getenv("CONTENT_ROUND_QUESTIONS_TEMPERATURE", "0.7"))
+        model       = settings.content_round_questions_model
+        max_tokens  = settings.content_round_questions_max_tokens
+        temperature = settings.content_round_questions_temperature
         log.debug("Calling %s for round question generation", model)
         response, tokens = await llm_call(
             self.client, __name__,
@@ -162,9 +162,9 @@ Instructions:
 - Organise clearly by round.
 - Be thorough and specific to this role and company."""
 
-        model       = os.getenv("CONTENT_ALL_QUESTIONS_MODEL",       "gpt-4o")
-        max_tokens  = int(os.getenv("CONTENT_ALL_QUESTIONS_MAX_TOKENS",  "4000"))
-        temperature = float(os.getenv("CONTENT_ALL_QUESTIONS_TEMPERATURE", "0.7"))
+        model       = settings.content_all_questions_model
+        max_tokens  = settings.content_all_questions_max_tokens
+        temperature = settings.content_all_questions_temperature
         log.debug("Calling %s for comprehensive question generation", model)
         response, tokens = await llm_call(
             self.client, __name__,
@@ -205,9 +205,9 @@ Generate 8 behavioral questions using the STAR method:
 
 Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Learning."""
 
-        model       = os.getenv("CONTENT_BEHAVIORAL_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("CONTENT_BEHAVIORAL_MAX_TOKENS",  "1500"))
-        temperature = float(os.getenv("CONTENT_BEHAVIORAL_TEMPERATURE", "0.7"))
+        model       = settings.content_behavioral_model
+        max_tokens  = settings.content_behavioral_max_tokens
+        temperature = settings.content_behavioral_temperature
         log.debug("Calling %s for behavioral question generation", model)
         response, tokens = await llm_call(
             self.client, __name__,
@@ -252,9 +252,9 @@ Instructions:
 - Add 1 "gotcha" question per skill that interviewers commonly use to trip candidates.
 - Be technically precise."""
 
-        model       = os.getenv("CONTENT_TECHNICAL_MODEL",       "gpt-4o")
-        max_tokens  = int(os.getenv("CONTENT_TECHNICAL_MAX_TOKENS",  "3000"))
-        temperature = float(os.getenv("CONTENT_TECHNICAL_TEMPERATURE", "0.5"))
+        model       = settings.content_technical_model
+        max_tokens  = settings.content_technical_max_tokens
+        temperature = settings.content_technical_temperature
         log.debug("Calling %s for technical deep dive generation", model)
         response, tokens = await llm_call(
             self.client, __name__,

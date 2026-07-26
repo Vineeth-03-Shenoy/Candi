@@ -1,10 +1,10 @@
 """
 Strategist Agent - Determines interview rounds and preparation strategy
 """
-import os
 import re
 from openai import AsyncOpenAI
 
+from app.config import settings
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
 
@@ -14,7 +14,7 @@ log = get_logger(__name__)
 class StrategistAgent:
     def __init__(self):
         log.debug("Initialising StrategistAgent")
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
 
     async def identify_rounds(self, jd_analysis: dict, company_research: dict) -> dict:
         company = company_research.get("company_name", "the company")
@@ -39,9 +39,9 @@ For each round, provide:
 
 Return 4-6 likely rounds in order. Be specific to the role and company."""
 
-        model       = os.getenv("STRATEGIST_ROUNDS_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("STRATEGIST_ROUNDS_MAX_TOKENS",  "1200"))
-        temperature = float(os.getenv("STRATEGIST_ROUNDS_TEMPERATURE", "0.6"))
+        model       = settings.strategist_rounds_model
+        max_tokens  = settings.strategist_rounds_max_tokens
+        temperature = settings.strategist_rounds_temperature
         log.debug("Calling %s to identify interview rounds", model)
         response, tokens = await llm_call(
             self.client, __name__,
@@ -97,9 +97,9 @@ Determine:
 
 Be practical and actionable."""
 
-        model       = os.getenv("STRATEGIST_SENIORITY_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("STRATEGIST_SENIORITY_MAX_TOKENS",  "800"))
-        temperature = float(os.getenv("STRATEGIST_SENIORITY_TEMPERATURE", "0.5"))
+        model       = settings.strategist_seniority_model
+        max_tokens  = settings.strategist_seniority_max_tokens
+        temperature = settings.strategist_seniority_temperature
         log.debug("Calling %s for seniority analysis", model)
         response, tokens = await llm_call(
             self.client, __name__,
@@ -150,9 +150,9 @@ Provide:
 
 Be specific and actionable for THIS candidate and THIS role."""
 
-        model       = os.getenv("STRATEGIST_STRATEGY_MODEL",       "gpt-4o")
-        max_tokens  = int(os.getenv("STRATEGIST_STRATEGY_MAX_TOKENS",  "1500"))
-        temperature = float(os.getenv("STRATEGIST_STRATEGY_TEMPERATURE", "0.7"))
+        model       = settings.strategist_strategy_model
+        max_tokens  = settings.strategist_strategy_max_tokens
+        temperature = settings.strategist_strategy_temperature
         log.debug("Calling %s to generate preparation strategy", model)
         response, tokens = await llm_call(
             self.client, __name__,

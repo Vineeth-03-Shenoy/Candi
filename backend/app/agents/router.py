@@ -6,10 +6,10 @@ Routes messages to either:
 2. FULL_PREPARATION - Research → Strategy → Content → PDF (slow, agentic)
 3. QUICK_QUESTION - Uses context from previous prep but answers quickly
 """
-import os
 from openai import AsyncOpenAI
 from typing import Literal
 
+from app.config import settings
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
 
@@ -21,7 +21,7 @@ IntentType = Literal["SIMPLE_CHAT", "FULL_PREPARATION", "QUICK_QUESTION"]
 class IntentRouter:
     def __init__(self):
         log.debug("Initialising IntentRouter")
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
 
     def classify_intent(
         self, message: str, has_resume: bool = False, has_jd: bool = False
@@ -85,9 +85,9 @@ class IntentRouter:
             messages.extend(conversation_history[-10:])
         messages.append({"role": "user", "content": message})
 
-        model       = os.getenv("ROUTER_SIMPLE_CHAT_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("ROUTER_SIMPLE_CHAT_MAX_TOKENS",  "500"))
-        temperature = float(os.getenv("ROUTER_SIMPLE_CHAT_TEMPERATURE", "0.7"))
+        model       = settings.router_simple_chat_model
+        max_tokens  = settings.router_simple_chat_max_tokens
+        temperature = settings.router_simple_chat_temperature
         log.debug("Calling %s for simple chat (%d total messages)", model, len(messages))
         response, tokens = await llm_call(
             self.client, __name__,
@@ -150,9 +150,9 @@ class IntentRouter:
             messages.extend(conversation_history[-10:])
         messages.append({"role": "user", "content": message})
 
-        model       = os.getenv("ROUTER_QUICK_QA_MODEL",       "gpt-4o-mini")
-        max_tokens  = int(os.getenv("ROUTER_QUICK_QA_MAX_TOKENS",  "1200"))
-        temperature = float(os.getenv("ROUTER_QUICK_QA_TEMPERATURE", "0.7"))
+        model       = settings.router_quick_qa_model
+        max_tokens  = settings.router_quick_qa_max_tokens
+        temperature = settings.router_quick_qa_temperature
         log.debug("Calling %s for quick question (%d total messages)", model, len(messages))
         response, tokens = await llm_call(
             self.client, __name__,
