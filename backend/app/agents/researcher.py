@@ -2,11 +2,13 @@
 Research Agent - Deep research for interview experiences and company info
 """
 import asyncio
+from typing import Optional
 
 import httpx
 
 from app.config import settings
 from app.models.schemas import JDInfo, ResumeInfo
+from app.services.cache_service import CacheService
 from app.services.llm_client import create_llm_client
 from app.services.search_provider import SearchProvider
 from app.utils.logger import get_logger
@@ -22,9 +24,10 @@ class ResearchAgent:
         "Chrome/120.0.0.0 Safari/537.36"
     )
 
-    def __init__(self):
-        log.debug("Initialising ResearchAgent")
+    def __init__(self, cache: Optional[CacheService] = None):
+        log.debug("Initialising ResearchAgent | cache=%s", bool(cache))
         self.client = create_llm_client()
+        self.cache = cache
         self.http_client = httpx.AsyncClient(
             timeout=20.0,
             follow_redirects=True,
@@ -75,6 +78,14 @@ class ResearchAgent:
     async def research_company(self, company_name: str, role: str, search: SearchProvider) -> dict:
         log.info("Starting company research | company='%s' | role='%s' | provider=%s",
                  company_name, role, search.name)
+
+        cache_key = f"res_co:{company_name.lower()}|{role.lower()}"
+        if self.cache:
+            cached = self.cache.get(cache_key)
+            if cached:
+                log.info("Company research cache hit | company='%s' | role='%s'",
+                         company_name, role)
+                return cached
 
         search1, search2 = await asyncio.gather(
             search.search(
@@ -144,17 +155,33 @@ Clearly note if specific data was limited."""
             company_name, len(summary), len([r for r in all_results if r.get("url")]),
         )
 
-        return {
+        result = {
             "company_name": company_name,
             "role": role,
             "research_summary": summary,
             "sources": [r.get("url", "") for r in all_results if r.get("url")],
             "_tokens": tokens,
+            # Strip cache-only sentinel before writing to SQLite, then re-add
+            # on cache hit so downstream that touches these keys doesn't trip.
+            "_cached": False,
         }
+
+        if self.cache:
+            self.cache.set(cache_key, result, ttl_seconds=settings.cache_ttl_days * 86400)
+
+        return result
 
     async def search_interview_experiences(self, company_name: str, role: str, search: SearchProvider) -> list[dict]:
         log.info("Searching for interview experiences | company='%s' | role='%s' | provider=%s",
                  company_name, role, search.name)
+
+        cache_key = f"res_ex:{company_name.lower()}|{role.lower()}"
+        if self.cache:
+            cached = self.cache.get(cache_key)
+            if cached:
+                log.info("Interview experiences cache hit | company='%s' | role='%s'",
+                         company_name, role)
+                return cached
 
         gfg_results, general_results = await asyncio.gather(
             search.search(
@@ -208,6 +235,10 @@ Clearly note if specific data was limited."""
             })
 
         log.info("Interview experience search complete | sources=%d", len(experiences))
+
+        if self.cache and experiences:
+            self.cache.set(cache_key, experiences, ttl_seconds=settings.cache_ttl_days * 86400)
+
         return experiences
 
     async def fetch_technical_qa(self, skills: list[str], role: str, search: SearchProvider) -> dict[str, str]:
@@ -218,6 +249,13 @@ Clearly note if specific data was limited."""
         log.info("Fetching technical Q&A | role='%s' | skills=%s | provider=%s", role, skills, search.name)
 
         async def _fetch_one(skill: str) -> tuple[str, str]:
+            cache_key = f"res_qa:{skill.lower()}"
+            if self.cache:
+                cached = self.cache.get(cache_key)
+                if cached:
+                    log.debug("Technical Q&A cache hit | skill='%s'", skill)
+                    return cached["skill"], cached["content"]
+
             log.debug("Fetching Q&A for skill='%s'", skill)
             results = await search.search(
                 f"{skill} interview questions and answers "
@@ -230,6 +268,12 @@ Clearly note if specific data was limited."""
                     content = await search.scrape_page(url, max_chars=4000)
                     if content and len(content) > 300:
                         log.info("Technical Q&A fetched | skill='%s' | length=%d chars", skill, len(content))
+                        if self.cache:
+                            self.cache.set(
+                                cache_key,
+                                {"skill": skill, "content": content},
+                                ttl_seconds=settings.cache_ttl_days * 86400,
+                            )
                         return skill, content
             fallback = "\n".join(r.get("snippet", "") for r in results if r.get("snippet"))
             log.warning("No trusted source found for skill='%s' — using snippet fallback", skill)

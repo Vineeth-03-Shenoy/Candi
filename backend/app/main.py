@@ -19,6 +19,7 @@ from app.agents.researcher import ResearchAgent
 from app.agents.strategist import StrategistAgent
 from app.agents.content_gen import ContentGenAgent
 from app.agents.retriever import RetrieverAgent
+from app.services.cache_service import CacheService
 from app.services.pdf_generator import PDFGenerator
 from app.services.search_provider import get_search_provider
 from app.services.session_store import SessionStore
@@ -29,24 +30,30 @@ from app.utils import pii_masker
 log = get_logger(__name__)
 log.info("Starting Candi API")
 
-router       = IntentRouter()
-researcher   = ResearchAgent()
-strategist   = StrategistAgent()
-content_gen  = ContentGenAgent()
-pdf_gen      = PDFGenerator()
-vector_store = VectorStore()
-retriever    = RetrieverAgent(vector_store)
+router        = IntentRouter()
+cache_service = CacheService()
+researcher    = ResearchAgent(cache=cache_service)
+strategist    = StrategistAgent()
+content_gen   = ContentGenAgent()
+pdf_gen       = PDFGenerator()
+vector_store  = VectorStore()
+retriever     = RetrieverAgent(vector_store)
 session_store = SessionStore()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: reap sessions older than the TTL, plus their Chroma collections."""
+    """Startup: reap sessions and cache entries older than their TTLs."""
     expired = session_store.cleanup_expired(settings.session_ttl_days * 86400)
     for sid in expired:
         vector_store.delete_session(sid)
     if expired:
         log.info("Startup cleanup complete | expired_sessions=%d", len(expired))
+
+    cache_reaped = cache_service.clear_expired()
+    if cache_reaped:
+        log.info("Startup cache cleanup complete | expired_entries=%d", cache_reaped)
+
     yield
 
 

@@ -8,10 +8,16 @@ OllamaLLMClient:  uses Ollama's OpenAI-compatible API endpoint.
 Agents interact only through `llm_call()` / `llm_parse()` in `llm_logger.py`;
 those helpers delegate here. Swapping the provider (OpenAI → Ollama) is a
 one-line change in `create_llm_client()`.
+
+Every chat() / parse() call is wrapped with exponential-backoff retries (B.8)
+so transient network errors, 429 rate limits, and 5xx server errors don't
+fail the whole pipeline — three attempts spaced 1s → 2s → 4s.
 """
 import json
 from abc import ABC, abstractmethod
 from typing import Any
+
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
 from app.utils.logger import get_logger
@@ -68,6 +74,7 @@ class OpenAILLMClient(LLMClient):
 
         self._client = AsyncOpenAI(api_key=api_key)
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
     async def chat(self, *, messages, model, temperature=0.7, max_tokens=512, **opts):
         response = await self._client.chat.completions.create(
             model=model,
@@ -84,6 +91,7 @@ class OpenAILLMClient(LLMClient):
         }
         return content, tokens
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
     async def parse(self, *, messages, response_format, model, temperature=0.7, max_tokens=512, **opts):
         response = await self._client.chat.completions.parse(
             model=model,
@@ -110,6 +118,7 @@ class OllamaLLMClient(LLMClient):
 
         self._client = AsyncOpenAI(base_url=base_url, api_key="ollama")
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
     async def chat(self, *, messages, model, temperature=0.7, max_tokens=512, **opts):
         response = await self._client.chat.completions.create(
             model=model,
@@ -126,6 +135,7 @@ class OllamaLLMClient(LLMClient):
         }
         return content, tokens
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
     async def parse(self, *, messages, response_format, model, temperature=0.7, max_tokens=512, **opts):
         """
         Ollama's OpenAI-compatible API supports JSON schema in response_format.

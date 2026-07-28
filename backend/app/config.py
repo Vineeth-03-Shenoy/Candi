@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # cleanup deletes it along with its Chroma vector-store collection.
     session_ttl_days: int = 7
 
+    # ── Research Cache (B.9) ─────────────────────────────────────────
+    # Web research results (company info, interview experiences, per-skill
+    # technical Q&A) are cached in SQLite for this many days. Repeat
+    # preparations for the same company or overlapping skillsets become
+    # near-instant and cost $0.
+    cache_ttl_days: int = 7
+
     # ── Router Agent ─────────────────────────────────────────────────
     router_simple_chat_model: str = "gpt-4o-mini"
     router_simple_chat_max_tokens: int = 500

@@ -26,6 +26,7 @@ from urllib.parse import quote_plus
 
 import httpx
 from bs4 import BeautifulSoup
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
 from app.utils.logger import get_logger
@@ -72,6 +73,7 @@ class SearchProvider(ABC):
     async def search(self, query: str, max_results: int = 5) -> list[dict]:
         """Run a web search. Returns [{"title": ..., "snippet": ..., "url": ...}, ...]."""
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
     async def scrape_page(self, url: str, max_chars: int = 4000) -> str:
         """Fetch and clean a page's main text. Shared by all providers (it's free)."""
         log.debug("Scraping page | url='%s' | max_chars=%d", url, max_chars)
@@ -119,6 +121,7 @@ class SearchProvider(ABC):
 class DuckDuckGoProvider(SearchProvider):
     name = "duckduckgo"
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
     async def search(self, query: str, max_results: int = 5) -> list[dict]:
         log.debug("DuckDuckGo search | max_results=%d | query='%s'", max_results, query)
         try:
@@ -165,6 +168,7 @@ class TavilyProvider(SearchProvider):
     name = "tavily"
     ENDPOINT = "https://api.tavily.com/search"
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), reraise=True)
     async def search(self, query: str, max_results: int = 5) -> list[dict]:
         log.debug("Tavily search | max_results=%d | query='%s'", max_results, query)
         payload = {
