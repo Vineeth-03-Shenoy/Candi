@@ -6,10 +6,10 @@ Routes messages to either:
 2. FULL_PREPARATION - Research → Strategy → Content → PDF (slow, agentic)
 3. QUICK_QUESTION - Uses context from previous prep but answers quickly
 """
-from openai import AsyncOpenAI
 from typing import Literal
 
 from app.config import settings
+from app.services.llm_client import create_llm_client
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
 
@@ -21,7 +21,7 @@ IntentType = Literal["SIMPLE_CHAT", "FULL_PREPARATION", "QUICK_QUESTION"]
 class IntentRouter:
     def __init__(self):
         log.debug("Initialising IntentRouter")
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self.client = create_llm_client()
 
     def classify_intent(
         self, message: str, has_resume: bool = False, has_jd: bool = False

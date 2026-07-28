@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 import os
 import re
 import json
@@ -20,6 +20,7 @@ from app.agents.strategist import StrategistAgent
 from app.agents.content_gen import ContentGenAgent
 from app.agents.retriever import RetrieverAgent
 from app.services.pdf_generator import PDFGenerator
+from app.services.search_provider import get_search_provider
 from app.services.session_store import SessionStore
 from app.services.vector_store import VectorStore
 from app.utils.logger import get_logger
@@ -104,6 +105,8 @@ class PrepareRequest(BaseModel):
     jd_text: str
     session_id: Optional[str] = "default"
     is_fresher: Optional[bool] = None
+    # Web search backend for the research step; None → SEARCH_PROVIDER env default
+    search_provider: Optional[Literal["duckduckgo", "tavily"]] = None
 
 
 # ------------------------------------------------------------------
@@ -261,12 +264,25 @@ async def chat(request: ChatMessage):
 # Preparation pipeline (SSE)
 # ------------------------------------------------------------------
 
-async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
+async def generate_prep_events(
+    resume_text: str,
+    jd_text: str,
+    session_id: str,
+    search_provider: Optional[str] = None,
+):
     """Generator that streams SSE progress events while running the full pipeline."""
     log.info(
-        "Preparation pipeline started | session_id='%s' | resume_chars=%d | jd_chars=%d",
-        session_id, len(resume_text), len(jd_text),
+        "Preparation pipeline started | session_id='%s' | resume_chars=%d | jd_chars=%d | search_provider=%s",
+        session_id, len(resume_text), len(jd_text), search_provider or settings.search_provider,
     )
+
+    # Resolve the search backend up front so a bad choice/missing key fails fast
+    try:
+        search = get_search_provider(search_provider, researcher.http_client)
+    except ValueError as exc:
+        log.warning("Search provider rejected | session_id='%s' | error=%s", session_id, exc)
+        yield f"data: {json.dumps({'step': 'error', 'message': str(exc)})}\n\n"
+        return
 
     # Session token accumulator for this pipeline run
     session = session_store.get(session_id) or {}
@@ -334,9 +350,9 @@ async def generate_prep_events(resume_text: str, jd_text: str, session_id: str):
         )
         yield f"data: {json.dumps({'step': 3, 'status': 'active', 'message': f'Researching {company_name} interview patterns...'})}\n\n"
         company_research, interview_experiences, technical_qa = await asyncio.gather(
-            researcher.research_company(company_name, role_name),
-            researcher.search_interview_experiences(company_name, role_name),
-            researcher.fetch_technical_qa(skills, role_name),
+            researcher.research_company(company_name, role_name, search),
+            researcher.search_interview_experiences(company_name, role_name, search),
+            researcher.fetch_technical_qa(skills, role_name, search),
         )
         _add_tokens(session, company_research.get("_tokens"))
         yield f"data: {json.dumps({'step': 3, 'status': 'complete', 'message': 'Company research complete'})}\n\n"
@@ -504,11 +520,15 @@ I've generated a comprehensive PDF guide with:
 async def prepare_interview(request: PrepareRequest):
     """Full preparation endpoint with SSE streaming progress."""
     log.info(
-        "POST /api/prepare | session_id='%s' | resume_chars=%d | jd_chars=%d",
+        "POST /api/prepare | session_id='%s' | resume_chars=%d | jd_chars=%d | search_provider=%s",
         request.session_id, len(request.resume_text), len(request.jd_text),
+        request.search_provider or settings.search_provider,
     )
     return StreamingResponse(
-        generate_prep_events(request.resume_text, request.jd_text, request.session_id),
+        generate_prep_events(
+            request.resume_text, request.jd_text, request.session_id,
+            search_provider=request.search_provider,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

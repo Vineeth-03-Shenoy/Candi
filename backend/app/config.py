@@ -10,8 +10,9 @@ Usage:
     model = settings.researcher_company_model
 """
 from pathlib import Path
+from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # This file: backend/app/config.py  →  parents[2] = repo root (where .env lives)
@@ -25,8 +26,24 @@ class Settings(BaseSettings):
         extra="ignore",  # tolerate unrelated vars in .env
     )
 
-    # ── API Keys (required — fail-fast) ──────────────────────────────
-    openai_api_key: str
+    # ── LLM Provider ─────────────────────────────────────────────────
+    # "openai" uses the OpenAI API (requires openai_api_key).
+    # "ollama" points at a local Ollama server via its OpenAI-compatible API
+    # (experimental: plain chat works; structured-output extraction does not).
+    llm_provider: Literal["openai", "ollama"] = "openai"
+    ollama_base_url: str = "http://localhost:11434/v1"
+
+    # ── API Keys ─────────────────────────────────────────────────────
+    # Required when llm_provider="openai" (enforced by the validator below,
+    # so Ollama-only setups can run key-free).
+    openai_api_key: str = ""
+
+    # ── Web Search Provider ──────────────────────────────────────────
+    # Used by the prep pipeline's research step. "duckduckgo" is free and
+    # keyless; "tavily" needs an API key (1,000 free credits/month).
+    # The frontend can override this per preparation run.
+    search_provider: Literal["duckduckgo", "tavily"] = "duckduckgo"
+    tavily_api_key: str = ""
 
     # ── Sessions ─────────────────────────────────────────────────────
     # How long a session (chat history + prep data) is kept before startup
@@ -85,15 +102,27 @@ class Settings(BaseSettings):
     content_technical_max_tokens: int = 3000
     content_technical_temperature: float = 0.5
 
+    @model_validator(mode="after")
+    def _require_openai_key_for_openai_provider(self) -> "Settings":
+        if self.llm_provider == "openai" and not self.openai_api_key.strip():
+            raise ValueError(
+                "OPENAI_API_KEY is required when LLM_PROVIDER=openai "
+                "(copy .env.example to .env and set your key)"
+            )
+        return self
+
 
 try:
     settings = Settings()
 except ValidationError as exc:
-    missing = [str(e["loc"][0]).upper() for e in exc.errors() if e["type"] == "missing"]
+    problems = []
+    for e in exc.errors():
+        field = str(e["loc"][0]).upper() if e["loc"] else "CONFIG"
+        problems.append(field if e["type"] == "missing" else f"{field} - {e['msg']}")
     raise SystemExit(
         "\n" + "=" * 64 + "\n"
-        " Candi cannot start - missing required configuration:\n"
-        f"   {', '.join(missing)}\n\n"
-        " Copy .env.example to .env (repo root) and set your key.\n"
+        " Candi cannot start - invalid configuration:\n   "
+        + "\n   ".join(problems)
+        + "\n\n See .env.example (repo root) for the full reference.\n"
         + "=" * 64
     ) from exc

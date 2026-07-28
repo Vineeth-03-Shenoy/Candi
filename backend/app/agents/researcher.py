@@ -1,45 +1,18 @@
 """
 Research Agent - Deep research for interview experiences and company info
 """
-import json
 import asyncio
-from datetime import datetime
-from pathlib import Path
-from urllib.parse import quote_plus
 
 import httpx
-from bs4 import BeautifulSoup
-from openai import AsyncOpenAI
 
 from app.config import settings
 from app.models.schemas import JDInfo, ResumeInfo
+from app.services.llm_client import create_llm_client
+from app.services.search_provider import SearchProvider
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call, llm_parse
 
 log = get_logger(__name__)
-
-
-# ------------------------------------------------------------------
-# Web search logger
-# ------------------------------------------------------------------
-
-def _web_search_log_path() -> Path:
-    """Return path to today's web search JSONL log, creating dirs as needed."""
-    now = datetime.now()
-    backend_root = Path(__file__).resolve().parents[2]
-    log_dir = backend_root / "Logs" / now.strftime("%Y") / now.strftime("%B")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    return log_dir / f"web_search_{now.strftime('%Y-%m-%d')}.jsonl"
-
-
-def _log_web_search(entry: dict) -> None:
-    """Append a single JSON entry to today's web search JSONL log."""
-    try:
-        path = _web_search_log_path()
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception as exc:
-        log.warning("Failed to write web search log | error=%s", exc)
 
 
 class ResearchAgent:
@@ -51,89 +24,12 @@ class ResearchAgent:
 
     def __init__(self):
         log.debug("Initialising ResearchAgent")
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self.client = create_llm_client()
         self.http_client = httpx.AsyncClient(
             timeout=20.0,
             follow_redirects=True,
             headers={"User-Agent": self.USER_AGENT},
         )
-
-    # ------------------------------------------------------------------
-    # Low-level helpers
-    # ------------------------------------------------------------------
-
-    async def _search_duckduckgo(self, query: str, max_results: int = 5) -> list[dict]:
-        log.debug("DuckDuckGo search | max_results=%d | query='%s'", max_results, query)
-        try:
-            url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-            response = await self.http_client.get(url)
-            log.debug("DuckDuckGo response | status=%d", response.status_code)
-
-            soup = BeautifulSoup(response.text, "html.parser")
-            results = []
-            for el in soup.select(".result")[:max_results]:
-                title_el   = el.select_one(".result__a")
-                snippet_el = el.select_one(".result__snippet")
-                url_el     = el.select_one(".result__url")
-
-                title   = title_el.get_text(strip=True)   if title_el   else ""
-                snippet = snippet_el.get_text(strip=True) if snippet_el else ""
-                href    = title_el.get("href", "")         if title_el   else ""
-                raw_url = url_el.get_text(strip=True)      if url_el     else href
-
-                if title or snippet:
-                    results.append({"title": title, "snippet": snippet, "url": raw_url})
-
-            log.info("DuckDuckGo search returned %d results | query='%s'", len(results), query[:80])
-            _log_web_search({
-                "timestamp": datetime.now().isoformat(),
-                "type": "ddg_search",
-                "query": query,
-                "max_results": max_results,
-                "results_count": len(results),
-                "results": results,
-            })
-            return results
-        except Exception as exc:
-            log.warning("DuckDuckGo search failed | query='%s' | error=%s", query[:80], exc)
-            return []
-
-    async def _scrape_page(self, url: str, max_chars: int = 4000) -> str:
-        log.debug("Scraping page | url='%s' | max_chars=%d", url, max_chars)
-        try:
-            if not url.startswith("http"):
-                url = "https://" + url
-
-            response = await self.http_client.get(url)
-            log.debug("Page response | status=%d | url='%s'", response.status_code, url)
-
-            soup = BeautifulSoup(response.text, "html.parser")
-            for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-                tag.decompose()
-
-            container = (
-                soup.select_one("article")
-                or soup.select_one(".article-body")
-                or soup.select_one("main")
-                or soup
-            )
-
-            text = container.get_text(separator="\n", strip=True)
-            lines = [l.strip() for l in text.split("\n") if l.strip() and len(l.strip()) > 20]
-            content = "\n".join(lines)[:max_chars]
-
-            log.info("Scraped page | url='%s' | content_length=%d chars", url, len(content))
-            _log_web_search({
-                "timestamp": datetime.now().isoformat(),
-                "type": "page_scrape",
-                "url": url,
-                "content_length": len(content),
-                "content_preview": content[:500],
-            })
-            return content
-        except Exception as exc:
-            log.warning("Page scrape failed | url='%s' | error=%s", url, exc)
-            return ""
 
     # ------------------------------------------------------------------
     # Structured extraction renderers
@@ -176,14 +72,15 @@ class ResearchAgent:
     # Web research
     # ------------------------------------------------------------------
 
-    async def research_company(self, company_name: str, role: str) -> dict:
-        log.info("Starting company research | company='%s' | role='%s'", company_name, role)
+    async def research_company(self, company_name: str, role: str, search: SearchProvider) -> dict:
+        log.info("Starting company research | company='%s' | role='%s' | provider=%s",
+                 company_name, role, search.name)
 
         search1, search2 = await asyncio.gather(
-            self._search_duckduckgo(
+            search.search(
                 f"{company_name} {role} interview process rounds 2024", max_results=4
             ),
-            self._search_duckduckgo(
+            search.search(
                 f'"{company_name}" {role} interview questions asked experience', max_results=3
             ),
         )
@@ -203,7 +100,7 @@ class ResearchAgent:
         page_contents: list[str] = []
         if urls_to_scrape:
             page_contents = await asyncio.gather(
-                *[self._scrape_page(u, max_chars=2500) for u in urls_to_scrape]
+                *[search.scrape_page(u, max_chars=2500) for u in urls_to_scrape]
             )
 
         scraped_sections = list(snippets)
@@ -257,15 +154,16 @@ Clearly note if specific data was limited."""
             "_tokens": tokens,
         }
 
-    async def search_interview_experiences(self, company_name: str, role: str) -> list[dict]:
-        log.info("Searching for interview experiences | company='%s' | role='%s'", company_name, role)
+    async def search_interview_experiences(self, company_name: str, role: str, search: SearchProvider) -> list[dict]:
+        log.info("Searching for interview experiences | company='%s' | role='%s' | provider=%s",
+                 company_name, role, search.name)
 
         gfg_results, general_results = await asyncio.gather(
-            self._search_duckduckgo(
+            search.search(
                 f"{company_name} interview experience {role} site:geeksforgeeks.org",
                 max_results=3,
             ),
-            self._search_duckduckgo(
+            search.search(
                 f"{company_name} {role} interview experience questions asked",
                 max_results=4,
             ),
@@ -284,7 +182,7 @@ Clearly note if specific data was limited."""
 
         if gfg_urls:
             contents = await asyncio.gather(
-                *[self._scrape_page(u, max_chars=3000) for u in gfg_urls]
+                *[search.scrape_page(u, max_chars=3000) for u in gfg_urls]
             )
             for url, content in zip(gfg_urls, contents):
                 if content and len(content) > 200:
@@ -314,16 +212,16 @@ Clearly note if specific data was limited."""
         log.info("Interview experience search complete | sources=%d", len(experiences))
         return experiences
 
-    async def fetch_technical_qa(self, skills: list[str], role: str) -> dict[str, str]:
+    async def fetch_technical_qa(self, skills: list[str], role: str, search: SearchProvider) -> dict[str, str]:
         if not skills:
             log.info("fetch_technical_qa called with no skills — skipping")
             return {}
 
-        log.info("Fetching technical Q&A | role='%s' | skills=%s", role, skills)
+        log.info("Fetching technical Q&A | role='%s' | skills=%s | provider=%s", role, skills, search.name)
 
         async def _fetch_one(skill: str) -> tuple[str, str]:
             log.debug("Fetching Q&A for skill='%s'", skill)
-            results = await self._search_duckduckgo(
+            results = await search.search(
                 f"{skill} interview questions and answers "
                 f"site:geeksforgeeks.org OR site:interviewbit.com",
                 max_results=2,
@@ -331,7 +229,7 @@ Clearly note if specific data was limited."""
             for r in results:
                 url = r.get("url", "")
                 if url and ("geeksforgeeks.org" in url or "interviewbit.com" in url):
-                    content = await self._scrape_page(url, max_chars=4000)
+                    content = await search.scrape_page(url, max_chars=4000)
                     if content and len(content) > 300:
                         log.info("Technical Q&A fetched | skill='%s' | length=%d chars", skill, len(content))
                         return skill, content

@@ -2,9 +2,8 @@
 Content Generator Agent - Generates interview questions and answers
 grounded in real company research and technical Q&A from trusted sources.
 """
-from openai import AsyncOpenAI
-
 from app.config import settings
+from app.services.llm_client import create_llm_client
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
 
@@ -25,7 +24,7 @@ def _sum_tokens(*token_dicts: dict) -> dict:
 class ContentGenAgent:
     def __init__(self):
         log.debug("Initialising ContentGenAgent")
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self.client = create_llm_client()
 
     # ------------------------------------------------------------------
     # Internal helpers

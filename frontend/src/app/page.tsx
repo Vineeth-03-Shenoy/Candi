@@ -8,10 +8,13 @@ import { FileUpload } from "@/components/FileUpload";
 import { ThinkingAnimation } from "@/components/ThinkingAnimation";
 import { Message } from "@/components/MessageBubble";
 import { Button } from "@/components/ui/button";
-import { X, Rocket, Download, Cpu } from "lucide-react";
+import { X, Rocket, Download, Cpu, Globe, Zap } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_CACHE_KEY = "candi_token_usage";
+const SEARCH_PROVIDER_KEY = "candi_search_provider";
+
+type SearchProvider = "duckduckgo" | "tavily";
 
 interface ThinkingStep {
   id: string;
@@ -40,6 +43,14 @@ function saveTokensToCache(usage: TokenUsage) {
   } catch {}
 }
 
+function loadSearchProvider(): SearchProvider {
+  try {
+    const stored = localStorage.getItem(SEARCH_PROVIDER_KEY);
+    if (stored === "tavily" || stored === "duckduckgo") return stored;
+  } catch {}
+  return "duckduckgo";
+}
+
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
@@ -55,6 +66,7 @@ export default function Home() {
   const [jdContent,     setJdContent]     = useState("");
   const [pdfPath,       setPdfPath]       = useState<string | null>(null);
   const [tokenUsage,    setTokenUsage]    = useState<TokenUsage>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+  const [searchProvider, setSearchProvider] = useState<SearchProvider>("duckduckgo");
 
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([
     { id: "1", icon: "file",      text: "Analyzing your resume...",                  status: "pending" },
@@ -68,10 +80,18 @@ export default function Home() {
 
   const sessionIdRef = useRef(`session_${Date.now()}`);
 
-  // Load token usage from localStorage on mount
+  // Load token usage + search provider from localStorage on mount
   useEffect(() => {
     setTokenUsage(loadTokensFromCache());
+    setSearchProvider(loadSearchProvider());
   }, []);
+
+  const chooseSearchProvider = (provider: SearchProvider) => {
+    setSearchProvider(provider);
+    try {
+      localStorage.setItem(SEARCH_PROVIDER_KEY, provider);
+    } catch {}
+  };
 
   const updateTokenUsage = useCallback((incoming: TokenUsage | undefined) => {
     if (!incoming) return;
@@ -117,9 +137,10 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          resume_text: resumeContent,
-          jd_text:     jdContent,
-          session_id:  sessionIdRef.current,
+          resume_text:     resumeContent,
+          jd_text:         jdContent,
+          session_id:      sessionIdRef.current,
+          search_provider: searchProvider,
         }),
       });
 
@@ -267,6 +288,44 @@ export default function Home() {
               <FileUpload type="resume" label="Your Resume"      onFileUploaded={setResumeContent} />
               <FileUpload type="jd"     label="Job Description"  onFileUploaded={setJdContent}     />
             </div>
+
+            {/* Web search provider picker */}
+            <div className="mt-3">
+              <p className="text-xs text-muted-foreground mb-1.5">Web search provider</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => chooseSearchProvider("duckduckgo")}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                    searchProvider === "duckduckgo"
+                      ? "border-cyan-500 bg-cyan-500/10 text-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Globe className="w-4 h-4 shrink-0" />
+                  <span>
+                    <span className="block font-medium">DuckDuckGo</span>
+                    <span className="block text-[10px] text-muted-foreground">Free · no API key</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chooseSearchProvider("tavily")}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                    searchProvider === "tavily"
+                      ? "border-cyan-500 bg-cyan-500/10 text-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Zap className="w-4 h-4 shrink-0" />
+                  <span>
+                    <span className="block font-medium">Tavily</span>
+                    <span className="block text-[10px] text-muted-foreground">API key · higher quality</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
             {canStart && (
               <Button
                 onClick={handleStartPreparation}
