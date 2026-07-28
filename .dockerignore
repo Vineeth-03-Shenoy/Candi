@@ -1,0 +1,48 @@
+# Python / dev
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment secrets
+.env
+*.env.local
+
+# Logs
+Logs/
+*.log
+
+# Databases
+*.db
+chroma_db/
+
+# Node
+node_modules/
+.next/
+
+# Runtime output
+output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docs (not needed in image)
+README.md
+ARCHITECTURE_REVIEW.md
+*.md

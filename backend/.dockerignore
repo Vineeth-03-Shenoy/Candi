@@ -1,0 +1,25 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Secrets
+.env
+
+# Runtime data (generated at runtime, not needed in image)
+*.db
+chroma_db/
+Logs/
+output/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md

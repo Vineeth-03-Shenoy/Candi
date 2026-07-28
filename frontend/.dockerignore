@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+
+# Env
+.env
+.env.local

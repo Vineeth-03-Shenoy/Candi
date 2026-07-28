@@ -111,9 +111,13 @@ class PrepareRequest(BaseModel):
     resume_text: str
     jd_text: str
     session_id: Optional[str] = "default"
-    is_fresher: Optional[bool] = None
     # Web search backend for the research step; None → SEARCH_PROVIDER env default
     search_provider: Optional[Literal["duckduckgo", "tavily"]] = None
+
+
+class RoundQuestionsRequest(BaseModel):
+    session_id: str
+    round_info: str
 
 
 # ------------------------------------------------------------------
@@ -298,12 +302,12 @@ async def generate_prep_events(
 
     try:
         # ── Step 1: Resume analysis (full text — needed to extract candidate name) ──
-        log.info("Pipeline step 1/7 — resume analysis | session_id='%s'", session_id)
+        log.info("Pipeline step 1/8 — resume analysis | session_id='%s'", session_id)
         yield f"data: {json.dumps({'step': 1, 'status': 'active', 'message': 'Analyzing your resume...'})}\n\n"
         resume_analysis = await researcher.extract_resume_info(resume_text)
         _add_tokens(session, resume_analysis.get("_tokens"))
         yield f"data: {json.dumps({'step': 1, 'status': 'complete', 'message': 'Resume analyzed'})}\n\n"
-        log.info("Pipeline step 1/7 complete | session_id='%s'", session_id)
+        log.info("Pipeline step 1/8 complete | session_id='%s'", session_id)
 
         # Extract candidate name (structured field), then create PII-masked
         # copies for all future prompts
@@ -318,12 +322,12 @@ async def generate_prep_events(
         )
 
         # ── Step 2: JD analysis (masked) ──
-        log.info("Pipeline step 2/7 — JD analysis | session_id='%s'", session_id)
+        log.info("Pipeline step 2/8 — JD analysis | session_id='%s'", session_id)
         yield f"data: {json.dumps({'step': 2, 'status': 'active', 'message': 'Analyzing job description...'})}\n\n"
         jd_analysis = await researcher.extract_jd_info(masked_jd)
         _add_tokens(session, jd_analysis.get("_tokens"))
         yield f"data: {json.dumps({'step': 2, 'status': 'complete', 'message': 'Job description analyzed'})}\n\n"
-        log.info("Pipeline step 2/7 complete | session_id='%s'", session_id)
+        log.info("Pipeline step 2/8 complete | session_id='%s'", session_id)
 
         jd_info      = jd_analysis["jd_info"]
         company_name = jd_info.company_name.strip() or "Target Company"
@@ -352,7 +356,7 @@ async def generate_prep_events(
 
         # ── Step 3: Parallel web research ──
         log.info(
-            "Pipeline step 3/7 — parallel web research | company='%s' | role='%s' | session_id='%s'",
+            "Pipeline step 3/8 — parallel web research | company='%s' | role='%s' | session_id='%s'",
             company_name, role_name, session_id,
         )
         yield f"data: {json.dumps({'step': 3, 'status': 'active', 'message': f'Researching {company_name} interview patterns...'})}\n\n"
@@ -364,7 +368,7 @@ async def generate_prep_events(
         _add_tokens(session, company_research.get("_tokens"))
         yield f"data: {json.dumps({'step': 3, 'status': 'complete', 'message': 'Company research complete'})}\n\n"
         log.info(
-            "Pipeline step 3/7 complete | sources=%d | experiences=%d | skills_with_qa=%d | session_id='%s'",
+            "Pipeline step 3/8 complete | sources=%d | experiences=%d | skills_with_qa=%d | session_id='%s'",
             len(company_research.get("sources", [])), len(interview_experiences),
             len(technical_qa), session_id,
         )
@@ -378,13 +382,13 @@ async def generate_prep_events(
         )
 
         # ── Step 4: Identify rounds ──
-        log.info("Pipeline step 4/7 — round identification | session_id='%s'", session_id)
+        log.info("Pipeline step 4/8 — round identification | session_id='%s'", session_id)
         yield f"data: {json.dumps({'step': 4, 'status': 'active', 'message': 'Identifying likely interview rounds...'})}\n\n"
         rounds = await strategist.identify_rounds(jd_analysis, company_research)
         _add_tokens(session, rounds.get("_tokens"))
         yield f"data: {json.dumps({'step': 4, 'status': 'complete', 'message': 'Interview rounds identified'})}\n\n"
         log.info(
-            "Pipeline step 4/7 complete | estimated_rounds=%s | session_id='%s'",
+            "Pipeline step 4/8 complete | estimated_rounds=%s | session_id='%s'",
             rounds.get("estimated_rounds"), session_id,
         )
 
@@ -397,12 +401,12 @@ async def generate_prep_events(
         )
 
         # ── Step 5: Preparation strategy ──
-        log.info("Pipeline step 5/7 — preparation strategy | session_id='%s'", session_id)
+        log.info("Pipeline step 5/8 — preparation strategy | session_id='%s'", session_id)
         yield f"data: {json.dumps({'step': 5, 'status': 'active', 'message': 'Creating preparation strategy...'})}\n\n"
         strategy = await strategist.generate_preparation_strategy(rounds, resume_analysis, jd_analysis)
         _add_tokens(session, strategy.get("_tokens"))
         yield f"data: {json.dumps({'step': 5, 'status': 'complete', 'message': 'Strategy created'})}\n\n"
-        log.info("Pipeline step 5/7 complete | session_id='%s'", session_id)
+        log.info("Pipeline step 5/8 complete | session_id='%s'", session_id)
 
         # Store strategy in vector store
         log.debug("Storing strategy in vector store | session_id='%s'", session_id)
@@ -412,9 +416,25 @@ async def generate_prep_events(
             role=role_name, company=company_name,
         )
 
-        # ── Step 6: Parallel question generation ──
-        log.info("Pipeline step 6/7 — parallel question generation | session_id='%s'", session_id)
-        yield f"data: {json.dumps({'step': 6, 'status': 'active', 'message': 'Generating tailored questions...'})}\n\n"
+        # ── Step 6: Role seniority analysis ──
+        log.info("Pipeline step 6/8 — role seniority analysis | session_id='%s'", session_id)
+        yield f"data: {json.dumps({'step': 6, 'status': 'active', 'message': 'Analyzing role seniority fit...'})}\n\n"
+        seniority = await strategist.analyze_role_seniority(resume_analysis, jd_analysis)
+        _add_tokens(session, seniority.get("_tokens"))
+        yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Seniority analysis complete'})}\n\n"
+        log.info("Pipeline step 6/8 complete | is_fresher=%s | session_id='%s'",
+                 seniority.get("is_fresher"), session_id)
+
+        log.debug("Storing seniority analysis in vector store | session_id='%s'", session_id)
+        vector_store.store_chunks(
+            session_id, "seniority",
+            seniority.get("seniority_analysis", ""),
+            role=role_name, company=company_name,
+        )
+
+        # ── Step 7: Parallel question generation ──
+        log.info("Pipeline step 7/8 — parallel question generation | session_id='%s'", session_id)
+        yield f"data: {json.dumps({'step': 7, 'status': 'active', 'message': 'Generating tailored questions...'})}\n\n"
         questions, behavioral, technical = await asyncio.gather(
             content_gen.generate_all_questions(
                 rounds, jd_analysis, resume_analysis,
@@ -434,8 +454,8 @@ async def generate_prep_events(
         _add_tokens(session, questions.get("_tokens"))
         _add_tokens(session, behavioral.get("_tokens"))
         _add_tokens(session, technical.get("_tokens"))
-        yield f"data: {json.dumps({'step': 6, 'status': 'complete', 'message': 'Questions generated'})}\n\n"
-        log.info("Pipeline step 6/7 complete | session_id='%s'", session_id)
+        yield f"data: {json.dumps({'step': 7, 'status': 'complete', 'message': 'Questions generated'})}\n\n"
+        log.info("Pipeline step 7/8 complete | session_id='%s'", session_id)
 
         # Store all question types in vector store
         log.debug("Storing questions in vector store | session_id='%s'", session_id)
@@ -455,9 +475,9 @@ async def generate_prep_events(
             role=role_name, company=company_name,
         )
 
-        # ── Step 7: PDF generation ──
-        log.info("Pipeline step 7/7 — PDF generation | session_id='%s'", session_id)
-        yield f"data: {json.dumps({'step': 7, 'status': 'active', 'message': 'Preparing your interview guide...'})}\n\n"
+        # ── Step 8: PDF generation ──
+        log.info("Pipeline step 8/8 — PDF generation | session_id='%s'", session_id)
+        yield f"data: {json.dumps({'step': 8, 'status': 'active', 'message': 'Preparing your interview guide...'})}\n\n"
         pdf_path = pdf_gen.generate_prep_guide(
             company_name=company_name,
             role_name=role_name,
@@ -465,13 +485,14 @@ async def generate_prep_events(
             jd_analysis=jd_analysis,
             rounds=rounds,
             strategy=strategy,
+            seniority_analysis=seniority,
             questions=questions,
             behavioral_questions=behavioral,
             technical_questions=technical,
         )
-        yield f"data: {json.dumps({'step': 7, 'status': 'complete', 'message': 'Guide ready!'})}\n\n"
+        yield f"data: {json.dumps({'step': 8, 'status': 'complete', 'message': 'Guide ready!'})}\n\n"
         log.info(
-            "Pipeline step 7/7 complete | pdf='%s' | session_id='%s'",
+            "Pipeline step 8/8 complete | pdf='%s' | session_id='%s'",
             os.path.basename(pdf_path), session_id,
         )
 
@@ -481,6 +502,7 @@ async def generate_prep_events(
             "jd_analysis":     jd_analysis,
             "rounds":          rounds,
             "strategy":        strategy,
+            "seniority":       seniority,
             "questions":       questions,
         }
         session["pdf_path"] = pdf_path
@@ -498,6 +520,9 @@ I've analyzed your profile and the job requirements. Here's what I found:
 
 **Role Analysis:**
 {jd_analysis.get('jd_analysis', '')[:500]}...
+
+**Role Fit & Salary Negotiation:**
+{seniority.get('seniority_analysis', '')[:300]}...
 
 **Interview Rounds:**
 {rounds.get('rounds_breakdown', '')[:300]}...
@@ -539,6 +564,54 @@ async def prepare_interview(request: PrepareRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+@app.post("/api/questions/round")
+async def get_round_questions(request: RoundQuestionsRequest):
+    """Generate targeted questions for a specific interview round (B.10)."""
+    log.info(
+        "POST /api/questions/round | session_id='%s' | round='%s'",
+        request.session_id, request.round_info[:80],
+    )
+    session = session_store.get(request.session_id)
+    if not session or not session.get("prep_data"):
+        raise HTTPException(status_code=400, detail="No preparation data found. Run /api/prepare first.")
+
+    prep = session["prep_data"]
+    result = await content_gen.generate_questions_for_round(
+        round_info=request.round_info,
+        jd_analysis=prep["jd_analysis"],
+        resume_analysis=prep["resume_analysis"],
+    )
+    _add_tokens(session, result.get("_tokens"))
+    session_store.save(request.session_id, session)
+    return {
+        "round_questions": result["round_questions"],
+        "token_usage": session["token_usage"],
+    }
+
+
+@app.post("/api/seniority")
+async def get_seniority_analysis(request: RoundQuestionsRequest):
+    """Run the role seniority analysis on stored prep data (B.10)."""
+    log.info(
+        "POST /api/seniority | session_id='%s'", request.session_id,
+    )
+    session = session_store.get(request.session_id)
+    if not session or not session.get("prep_data"):
+        raise HTTPException(status_code=400, detail="No preparation data found. Run /api/prepare first.")
+
+    prep = session["prep_data"]
+    result = await strategist.analyze_role_seniority(
+        prep["resume_analysis"], prep["jd_analysis"],
+    )
+    _add_tokens(session, result.get("_tokens"))
+    session_store.save(request.session_id, session)
+    return {
+        "seniority_analysis": result["seniority_analysis"],
+        "is_fresher": result["is_fresher"],
+        "token_usage": session["token_usage"],
+    }
 
 
 @app.get("/api/download/{filename}")

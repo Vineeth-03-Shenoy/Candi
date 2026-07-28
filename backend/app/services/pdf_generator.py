@@ -74,6 +74,7 @@ class PDFGenerator:
         questions: dict,
         behavioral_questions: dict = None,
         technical_questions: dict = None,
+        seniority_analysis: dict = None,
     ) -> str:
         """
         Generate a comprehensive interview prep guide PDF.
@@ -145,6 +146,17 @@ class PDFGenerator:
             self.styles["CustomBodyText"],
         ))
         story.append(Spacer(1, 0.3 * inch))
+
+        # Seniority analysis & salary negotiation
+        if seniority_analysis:
+            log.debug("Adding seniority analysis section")
+            story.append(Paragraph("Role Fit & Salary Negotiation", self.styles["SectionTitle"]))
+            story.append(Paragraph(
+                self._clean_markdown(seniority_analysis.get("seniority_analysis", "Not available")),
+                self.styles["CustomBodyText"],
+            ))
+            if not behavioral_questions and not technical_questions:
+                story.append(Spacer(1, 0.3 * inch))
 
         # Preparation strategy
         log.debug("Adding preparation strategy section")
