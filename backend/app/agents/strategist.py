@@ -43,16 +43,14 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         max_tokens  = settings.strategist_rounds_max_tokens
         temperature = settings.strategist_rounds_temperature
         log.debug("Calling %s to identify interview rounds", model)
-        response, tokens = await llm_call(
+        rounds_text, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        rounds_text = response.choices[0].message.content
-        estimated   = self._count_rounds(rounds_text)
+        estimated = self._count_rounds(rounds_text)
 
         log.info(
             "Interview rounds identified | estimated_rounds=%d | response_length=%d chars",
@@ -101,16 +99,14 @@ Be practical and actionable."""
         max_tokens  = settings.strategist_seniority_max_tokens
         temperature = settings.strategist_seniority_temperature
         log.debug("Calling %s for seniority analysis", model)
-        response, tokens = await llm_call(
+        analysis_text, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        analysis_text = response.choices[0].message.content
-        is_fresher    = "fresher" in analysis_text.lower()
+        is_fresher = "fresher" in analysis_text.lower()
         log.info("Seniority analysis complete | is_fresher=%s", is_fresher)
 
         return {
@@ -154,15 +150,13 @@ Be specific and actionable for THIS candidate and THIS role."""
         max_tokens  = settings.strategist_strategy_max_tokens
         temperature = settings.strategist_strategy_temperature
         log.debug("Calling %s to generate preparation strategy", model)
-        response, tokens = await llm_call(
+        strategy_text, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        strategy_text = response.choices[0].message.content
         log.info("Preparation strategy generated | strategy_length=%d chars", len(strategy_text))
 
         return {

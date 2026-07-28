@@ -1,14 +1,17 @@
 """
-LLM client factory — single place that decides which LLM backend agents use.
+LLM client abstraction — single interface, pluggable backends (B.7).
 
-Today: OpenAI (default). Later: Ollama via its OpenAI-compatible API — flip
-LLM_PROVIDER=ollama in .env and every agent talks to the local server instead
-(free, offline; note structured-output extraction via llm_parse is OpenAI-only).
+OpenAILLMClient: uses the official OpenAI SDK.
+OllamaLLMClient:  uses Ollama's OpenAI-compatible API endpoint.
+                  Chat works today; parse() uses JSON schema (experimental).
 
-All agents construct their client through create_llm_client() so the switch
-lives here and nowhere else.
+Agents interact only through `llm_call()` / `llm_parse()` in `llm_logger.py`;
+those helpers delegate here. Swapping the provider (OpenAI → Ollama) is a
+one-line change in `create_llm_client()`.
 """
-from openai import AsyncOpenAI
+import json
+from abc import ABC, abstractmethod
+from typing import Any
 
 from app.config import settings
 from app.utils.logger import get_logger
@@ -16,14 +19,160 @@ from app.utils.logger import get_logger
 log = get_logger(__name__)
 
 
-def create_llm_client() -> AsyncOpenAI:
-    """Return an async chat-completions client for the configured provider."""
+class LLMClient(ABC):
+    """
+    One interface for every LLM call in Candi.
+
+    Return contract for all methods:
+        (content_or_parsed, token_usage)
+        token_usage = {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}
+    """
+
+    provider_name: str
+
+    @abstractmethod
+    async def chat(
+        self,
+        *,
+        messages: list[dict],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        **opts,
+    ) -> tuple[str, dict]:
+        """Plain chat completion. Returns (content_text, token_usage)."""
+
+    @abstractmethod
+    async def parse(
+        self,
+        *,
+        messages: list[dict],
+        response_format: type,
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        **opts,
+    ) -> tuple[Any, dict]:
+        """
+        Structured output. Returns (parsed_pydantic_model, token_usage).
+        The OpenAI implementation uses native `chat.completions.parse()`;
+        the Ollama implementation falls back to `create()` with a JSON schema.
+        """
+
+
+class OpenAILLMClient(LLMClient):
+    provider_name = "openai"
+
+    def __init__(self, api_key: str):
+        from openai import AsyncOpenAI
+
+        self._client = AsyncOpenAI(api_key=api_key)
+
+    async def chat(self, *, messages, model, temperature=0.7, max_tokens=512, **opts):
+        response = await self._client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **opts,
+        )
+        content = response.choices[0].message.content if response.choices else ""
+        tokens = {
+            "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+            "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+            "total_tokens": response.usage.total_tokens if response.usage else 0,
+        }
+        return content, tokens
+
+    async def parse(self, *, messages, response_format, model, temperature=0.7, max_tokens=512, **opts):
+        response = await self._client.chat.completions.parse(
+            model=model,
+            messages=messages,
+            response_format=response_format,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **opts,
+        )
+        parsed = response.choices[0].message.parsed if response.choices else None
+        tokens = {
+            "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+            "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+            "total_tokens": response.usage.total_tokens if response.usage else 0,
+        }
+        return parsed, tokens
+
+
+class OllamaLLMClient(LLMClient):
+    provider_name = "ollama"
+
+    def __init__(self, base_url: str):
+        from openai import AsyncOpenAI
+
+        self._client = AsyncOpenAI(base_url=base_url, api_key="ollama")
+
+    async def chat(self, *, messages, model, temperature=0.7, max_tokens=512, **opts):
+        response = await self._client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **opts,
+        )
+        content = response.choices[0].message.content if response.choices else ""
+        tokens = {
+            "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+            "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+            "total_tokens": response.usage.total_tokens if response.usage else 0,
+        }
+        return content, tokens
+
+    async def parse(self, *, messages, response_format, model, temperature=0.7, max_tokens=512, **opts):
+        """
+        Ollama's OpenAI-compatible API supports JSON schema in response_format.
+        We build the schema from the Pydantic model, call create() (not parse()),
+        and manually validate the returned JSON string.
+        """
+        try:
+            schema = response_format.model_json_schema()
+        except Exception:
+            schema = {}
+
+        response = await self._client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": getattr(response_format, "__name__", "response"),
+                    "schema": schema,
+                    "strict": True,
+                },
+            },
+            **opts,
+        )
+        raw_content = response.choices[0].message.content if response.choices else "{}"
+        try:
+            data = json.loads(raw_content)
+            parsed = response_format.model_validate(data)
+        except Exception:
+            log.warning("Ollama parse validation failed | raw=%s", raw_content[:200])
+            parsed = None
+
+        tokens = {
+            "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+            "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+            "total_tokens": response.usage.total_tokens if response.usage else 0,
+        }
+        return parsed, tokens
+
+
+def create_llm_client() -> LLMClient:
+    """Build the configured LLM client (OpenAI today, Ollama later)."""
     if settings.llm_provider == "ollama":
         log.info("LLM provider: Ollama | base_url=%s", settings.ollama_base_url)
-        return AsyncOpenAI(
-            base_url=settings.ollama_base_url,
-            api_key="ollama",  # Ollama ignores the key; the SDK requires one
-        )
+        return OllamaLLMClient(base_url=settings.ollama_base_url)
 
     log.debug("LLM provider: OpenAI")
-    return AsyncOpenAI(api_key=settings.openai_api_key)
+    return OpenAILLMClient(api_key=settings.openai_api_key)

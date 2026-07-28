@@ -89,15 +89,13 @@ class IntentRouter:
         max_tokens  = settings.router_simple_chat_max_tokens
         temperature = settings.router_simple_chat_temperature
         log.debug("Calling %s for simple chat (%d total messages)", model, len(messages))
-        response, tokens = await llm_call(
+        reply, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        reply = response.choices[0].message.content
         log.info("simple_chat_response complete | reply_length=%d chars", len(reply))
         return reply, tokens
 
@@ -154,14 +152,12 @@ class IntentRouter:
         max_tokens  = settings.router_quick_qa_max_tokens
         temperature = settings.router_quick_qa_temperature
         log.debug("Calling %s for quick question (%d total messages)", model, len(messages))
-        response, tokens = await llm_call(
+        reply, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        reply = response.choices[0].message.content
         log.info("quick_question_response complete | reply_length=%d chars", len(reply))
         return reply, tokens

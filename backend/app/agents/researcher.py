@@ -132,15 +132,13 @@ Clearly note if specific data was limited."""
         max_tokens  = settings.researcher_company_max_tokens
         temperature = settings.researcher_company_temperature
         log.debug("Calling %s to synthesise company research", model)
-        response, tokens = await llm_call(
+        summary, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        summary = response.choices[0].message.content
         log.info(
             "Company research complete | company='%s' | summary_length=%d chars | sources=%d",
             company_name, len(summary), len([r for r in all_results if r.get("url")]),
@@ -263,7 +261,7 @@ Job Description:
         max_tokens  = settings.researcher_jd_max_tokens
         temperature = settings.researcher_jd_temperature
         log.debug("Calling %s to extract JD info (structured)", model)
-        response, tokens = await llm_parse(
+        info, tokens = await llm_parse(
             self.client, __name__,
             response_format=JDInfo,
             model=model,
@@ -271,12 +269,12 @@ Job Description:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        info = response.choices[0].message.parsed or JDInfo(
-            company_name="", role_title="", experience_level="",
-            required_skills=[], nice_to_have_skills=[],
-            key_responsibilities=[], interview_focus_areas=[],
-        )
+        if not info:
+            info = JDInfo(
+                company_name="", role_title="", experience_level="",
+                required_skills=[], nice_to_have_skills=[],
+                key_responsibilities=[], interview_focus_areas=[],
+            )
         log.info(
             "JD info extracted | company='%s' | role='%s' | skills=%d",
             info.company_name, info.role_title, len(info.required_skills),
@@ -304,7 +302,7 @@ Resume:
         log.debug("Calling %s to extract resume info (structured)", model)
         # This call intentionally receives the full unmasked resume (needed to
         # extract the candidate name) — withhold it from the JSONL log.
-        response, tokens = await llm_parse(
+        info, tokens = await llm_parse(
             self.client, __name__,
             response_format=ResumeInfo,
             pii_masked=False,
@@ -313,12 +311,12 @@ Resume:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        info = response.choices[0].message.parsed or ResumeInfo(
-            candidate_name="", experience_level="", current_role="",
-            top_skills=[], key_projects=[], education="",
-            strengths_for_interviews=[], potential_gaps=[],
-        )
+        if not info:
+            info = ResumeInfo(
+                candidate_name="", experience_level="", current_role="",
+                top_skills=[], key_projects=[], education="",
+                strengths_for_interviews=[], potential_gaps=[],
+            )
         log.info(
             "Resume info extracted | name_found=%s | top_skills=%d",
             bool(info.candidate_name), len(info.top_skills),

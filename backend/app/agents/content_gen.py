@@ -114,15 +114,13 @@ Generate 5-8 questions relevant to this round type."""
         max_tokens  = settings.content_round_questions_max_tokens
         temperature = settings.content_round_questions_temperature
         log.debug("Calling %s for round question generation", model)
-        response, tokens = await llm_call(
+        result, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        result = response.choices[0].message.content
         log.info("Round questions generated | length=%d chars", len(result))
         return {"round_questions": result, "_tokens": tokens}
 
@@ -165,15 +163,13 @@ Instructions:
         max_tokens  = settings.content_all_questions_max_tokens
         temperature = settings.content_all_questions_temperature
         log.debug("Calling %s for comprehensive question generation", model)
-        response, tokens = await llm_call(
+        result, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        result = response.choices[0].message.content
         log.info("All questions generated | length=%d chars", len(result))
         return {"comprehensive_questions": result, "_tokens": tokens}
 
@@ -208,15 +204,13 @@ Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Le
         max_tokens  = settings.content_behavioral_max_tokens
         temperature = settings.content_behavioral_temperature
         log.debug("Calling %s for behavioral question generation", model)
-        response, tokens = await llm_call(
+        result, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        result = response.choices[0].message.content
         log.info("Behavioral questions generated | length=%d chars", len(result))
         return {"behavioral_questions": result, "_tokens": tokens}
 
@@ -255,14 +249,12 @@ Instructions:
         max_tokens  = settings.content_technical_max_tokens
         temperature = settings.content_technical_temperature
         log.debug("Calling %s for technical deep dive generation", model)
-        response, tokens = await llm_call(
+        result, tokens = await llm_call(
             self.client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
         )
-
-        result = response.choices[0].message.content
         log.info("Technical deep dives generated | length=%d chars", len(result))
         return {"technical_questions": result, "_tokens": tokens}

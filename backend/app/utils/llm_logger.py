@@ -1,7 +1,7 @@
 """
 LLM Interaction Logger
 
-Wraps every OpenAI API call to capture and persist:
+Wraps every LLM call (chat or structured parse) to capture and persist:
   - Model used
   - Input messages (PII-sanitised; withheld entirely for unmasked calls)
   - Output text (PII-sanitised)
@@ -14,17 +14,21 @@ Log file location:
 
 Each line in the file is a self-contained JSON object (JSONL format).
 """
-import json
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app.services.llm_client import LLMClient
 from app.utils import pii_masker
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
 
+
+# ------------------------------------------------------------------
+# Log helpers
+# ------------------------------------------------------------------
 
 def _llm_log_path() -> Path:
     """Return the path to today's JSONL log file, creating directories as needed."""
@@ -43,6 +47,7 @@ def _llm_log_path() -> Path:
 def _write_llm_log(entry: dict) -> None:
     """Append a single JSON entry to today's JSONL interaction log."""
     try:
+        import json
         path = _llm_log_path()
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -61,35 +66,26 @@ def _sanitize_messages(messages: list) -> list:
     return sanitized
 
 
-def _finalize(
+def _log_interaction(
     module_name: str,
     model: str,
     messages: list,
     settings: dict,
-    response: Any,
+    output_text: str,
+    tokens: dict,
     elapsed: float,
     pii_masked: bool,
-) -> tuple[Any, dict]:
-    """Shared post-call logic: token extraction, console log, JSONL persistence."""
-    usage = response.usage
-    tokens = {
-        "prompt_tokens":     usage.prompt_tokens     if usage else 0,
-        "completion_tokens": usage.completion_tokens if usage else 0,
-        "total_tokens":      usage.total_tokens      if usage else 0,
-    }
-
-    output_text = response.choices[0].message.content if response.choices else ""
-
+) -> None:
+    """Log a completed LLM interaction to console + JSONL."""
     log.info(
         "LLM call complete | module=%s | model=%s | prompt_tokens=%d | completion_tokens=%d | time=%.3fs",
         module_name, model,
         tokens["prompt_tokens"], tokens["completion_tokens"], elapsed,
     )
 
-    # Never persist raw PII. Unmasked calls (e.g. the initial resume parse, which
-    # intentionally receives the full resume to extract the candidate name) have
-    # their content withheld entirely; masked calls are still defensively
-    # re-sanitised before hitting disk.
+    # Never persist raw PII. Unmasked calls have their content withheld
+    # entirely; masked calls are still defensively re-sanitised before
+    # hitting disk.
     if pii_masked:
         logged_input  = _sanitize_messages(messages)
         logged_output = pii_masker.mask_pii(output_text or "")
@@ -112,20 +108,22 @@ def _finalize(
     }
     _write_llm_log(entry)
 
-    return response, tokens
 
+# ------------------------------------------------------------------
+# Public wrappers
+# ------------------------------------------------------------------
 
 async def llm_call(
-    client: Any,
+    client: LLMClient,
     module_name: str,
     pii_masked: bool = True,
     **kwargs,
-) -> tuple[Any, dict]:
+) -> tuple[str, dict]:
     """
-    Async drop-in replacement for client.chat.completions.create().
+    Async wrapper around LLMClient.chat().
 
     Usage:
-        response, tokens = await llm_call(self.client, __name__,
+        content, tokens = await llm_call(self.client, __name__,
                                           model="gpt-4o-mini",
                                           messages=[...],
                                           temperature=0.7,
@@ -137,8 +135,8 @@ async def llm_call(
                      withholds the content instead of persisting it.
 
     Returns:
-        response   — the raw OpenAI response object
-        tokens     — dict with prompt_tokens, completion_tokens, total_tokens
+        content  — the LLM's text response
+        tokens   — dict with prompt_tokens, completion_tokens, total_tokens
     """
     model    = kwargs.get("model", "unknown")
     messages = kwargs.get("messages", [])
@@ -150,28 +148,32 @@ async def llm_call(
     )
 
     start    = time.perf_counter()
-    response = await client.chat.completions.create(**kwargs)
+    content, tokens = await client.chat(**kwargs)
     elapsed  = round(time.perf_counter() - start, 3)
 
-    return _finalize(module_name, model, messages, settings, response, elapsed, pii_masked)
+    _log_interaction(module_name, model, messages, settings, content, tokens, elapsed, pii_masked)
+    return content, tokens
 
 
 async def llm_parse(
-    client: Any,
+    client: LLMClient,
     module_name: str,
     response_format: Any,
     pii_masked: bool = True,
     **kwargs,
 ) -> tuple[Any, dict]:
     """
-    Structured Outputs variant of llm_call — uses chat.completions.parse() so the
-    response is validated against a Pydantic model (response.choices[0].message.parsed).
+    Structured Outputs variant — wrapper around LLMClient.parse().
 
     Usage:
-        response, tokens = await llm_parse(self.client, __name__,
-                                           response_format=JDInfo,
-                                           model="gpt-4o-mini",
-                                           messages=[...])
+        parsed, tokens = await llm_parse(self.client, __name__,
+                                        response_format=JDInfo,
+                                        model="gpt-4o-mini",
+                                        messages=[...])
+
+    Returns:
+        parsed  — the validated Pydantic model instance (or None on failure)
+        tokens  — dict with prompt_tokens, completion_tokens, total_tokens
     """
     model    = kwargs.get("model", "unknown")
     messages = kwargs.get("messages", [])
@@ -184,9 +186,11 @@ async def llm_parse(
     )
 
     start    = time.perf_counter()
-    response = await client.chat.completions.parse(
-        response_format=response_format, **kwargs
-    )
+    parsed, tokens = await client.parse(response_format=response_format, **kwargs)
     elapsed  = round(time.perf_counter() - start, 3)
 
-    return _finalize(module_name, model, messages, settings, response, elapsed, pii_masked)
+    _log_interaction(
+        module_name, model, messages, settings,
+        str(parsed) if parsed else "", tokens, elapsed, pii_masked,
+    )
+    return parsed, tokens
