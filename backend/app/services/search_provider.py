@@ -84,6 +84,11 @@ class SearchProvider(ABC):
             response = await self._http.get(url)
             log.debug("Page response | status=%d | url='%s'", response.status_code, url)
 
+            ct = response.headers.get("content-type", "")
+            if response.status_code != 200 or not ct or "html" not in ct.lower():
+                log.info("Skipping non-HTML page | url='%s' | content_type='%s'", url, ct)
+                return ""
+
             soup = BeautifulSoup(response.text, "html.parser")
             for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
                 tag.decompose()

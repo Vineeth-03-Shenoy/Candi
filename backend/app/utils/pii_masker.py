@@ -26,10 +26,11 @@ _EMAIL = re.compile(
 )
 
 _PHONE = re.compile(
-    r'(\+?1[\s.\-]?)?'                  # optional country code
-    r'(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}'   # US/international 10-digit
-    r'|\+?\d[\d\s\-().]{7,14}\d'        # generic international
-    r')',
+    r'(?:\+1[\s.\-]?)?'                             # optional US country code
+    r'(?:\(\d{3}\)[\s.\-]?\d{3}[\s.\-]?\d{4}'       # (555) 123-4567
+    r'|\d{3}[\s.\-]\d{3}[\s.\-]\d{4})'              # 555-123-4567 (requires separator)
+    r'|\+\d{1,3}[\s.\-]?\d{2,4}[\s.\-]?\d{2,4}[\s.\-]?\d{2,4}'  # intl with + and optional separators
+    r'|\+\d{8,15}',                                  # E.164 (leading +, 8-15 digits)
 )
 
 # Titles followed by a capitalised word (interviewer name hints in chat)

@@ -1074,26 +1074,64 @@ async def get_flashcards(session_id: str):
     for text in data_sources:
         if not text:
             continue
-        blocks = re.split(r"\n(?=\d+\.\s*\*\*Question|\*\*Question|###)", text)
+
+        # Split on question boundaries: numbered items with bold Question markers,
+        # or lines starting with bold Question
+        blocks = re.split(
+            r"\n(?=\d+\.\s*\*\*Question\*\*|\d+\.\s*\*\*[^*]+\*\*|###\s+Round|\*\*Question\*\*)",
+            text,
+        )
+
         for block in blocks:
+            # Try the standard format: "1. **Question**: text..."
             q_match = re.search(
-                r"(?:\d+\.\s*)?\*{0,2}Question\*{0,2}[\s:]+(.+?)(?:\n|$)", block
+                r"(?:\d+\.\s*)?\*{0,2}Question\*{0,2}[\s:]+(.+?)(?:\n|$)",
+                block,
             )
+            # Also try numbered format: "1. How would you..."
+            if not q_match:
+                q_match = re.search(
+                    r"^\d+\.\s*\*{0,2}(.+?)\*{0,2}(?:\n|$)",
+                    block,
+                )
+
             if not q_match:
                 continue
+
             question = q_match.group(1).strip()
             if len(question) < 10 or question.lower() in seen:
                 continue
             seen.add(question.lower())
 
             answer = block[q_match.end():].strip()
-            answer = re.sub(r'\*\*Why They Ask This\*\*', '\n\n**Why They Ask This**', answer)
-            answer = re.sub(r'\*\*Key Points to Cover\*\*', '\n\n**Key Points to Cover**', answer)
-            answer = re.sub(r'\*\*Sample Answer.*?\*\*', '\n\n**Sample Answer**', answer)
-            answer = re.sub(r'\*\*Common Mistakes\*\*', '\n\n**Common Mistakes**', answer)
-            answer = answer[:600]
+            # Normalise common sub-headers
+            for label in ("Why They Ask This", "Key Points to Cover",
+                          "Sample Answer", "Sample Answer Framework",
+                          "Common Mistakes", "STAR", "Guidance"):
+                answer = re.sub(
+                    r'\*{0,2}' + label + r'\*{0,2}',
+                    f'\n\n**{label}**', answer,
+                )
+            answer = re.sub(r'\*{0,2}Question\*{0,2}', '', answer)
+            answer = answer.strip()[:600] if answer.strip() else "(See full guide for details)"
 
             cards.append({"question": question, "answer": answer})
+
+    # Fallback: parse line-by-line for behavioral format (STAR questions without
+    # explicit Question headers — each line starting with a number is a question)
+    if not cards:
+        for text in data_sources:
+            if not text:
+                continue
+            for line in text.split("\n"):
+                m = re.match(r"^\s*(\d+)\.\s*\*{0,2}(.+?)\*{0,2}\s*$", line)
+                if m and len(m.group(2).strip()) > 20:
+                    q = m.group(2).strip()
+                    if q.lower() not in seen:
+                        seen.add(q.lower())
+                        cards.append({"question": q, "answer": "(Review the full prep guide for a detailed answer.)"})
+            if cards:
+                break
 
     log.info("Flashcards generated | session_id=%s | count=%d", session_id, len(cards))
     return {"cards": cards, "count": len(cards)}

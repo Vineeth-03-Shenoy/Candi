@@ -236,7 +236,7 @@ class VectorStore:
             raw_chunks = self._chunk_by_rounds(text)
             chunks_to_store = raw_chunks
 
-        elif document_type in ("company_research", "strategy", "questions", "behavioral", "technical"):
+        elif document_type in ("company_research", "strategy", "questions", "behavioral", "technical", "seniority"):
             raw_chunks = self._chunk_sliding_window(text, window_tokens=400, overlap_tokens=50)
             chunks_to_store = [{"text": c, "chunk_index": i} for i, c in enumerate(raw_chunks)]
 

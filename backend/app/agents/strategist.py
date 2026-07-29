@@ -64,11 +64,13 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         }
 
     def _count_rounds(self, text: str) -> int:
+        # Only match round headers: "**Round N" or "### Round N" at line starts,
+        # NOT sub-bullet numbers or "Interview 1" inside content paragraphs.
         matches = re.findall(
-            r'(?:Round|Stage|Interview)\s*\d+|^\d+\.', text, re.MULTILINE | re.IGNORECASE
+            r'^\s*\*{0,2}Round\s+\d+',
+            text, re.MULTILINE | re.IGNORECASE,
         )
-        # Report the actual count found; only fall back to 4 when nothing matched
-        count = len(matches) if matches else 4
+        count = max(len(set(matches)), 3) if matches else 4
         log.debug("Round count heuristic | regex_matches=%d | final_count=%d", len(matches), count)
         return count
 
@@ -106,7 +108,11 @@ Be practical and actionable."""
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        is_fresher = "fresher" in analysis_text.lower()
+        # Check the structured output field, not a blind substring match
+        is_fresher = bool(re.search(
+            r'\*\*Candidate Level\*\*[:\s]*.*\b(Fresher|Junior|Entry)\b',
+            analysis_text, re.IGNORECASE,
+        ))
         log.info("Seniority analysis complete | is_fresher=%s", is_fresher)
 
         return {
