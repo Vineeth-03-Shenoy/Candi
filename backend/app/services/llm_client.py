@@ -178,9 +178,13 @@ class OllamaLLMClient(LLMClient):
         return parsed, tokens
 
 
-def create_llm_client() -> LLMClient:
-    """Build the configured LLM client (OpenAI today, Ollama later)."""
-    if settings.llm_provider == "ollama":
+from typing import Optional
+
+
+def create_llm_client(provider: Optional[str] = None) -> LLMClient:
+    """Build the configured LLM client. provider overrides the env default."""
+    target = (provider or settings.llm_provider).strip().lower()
+    if target == "ollama":
         log.info("LLM provider: Ollama | base_url=%s", settings.ollama_base_url)
         return OllamaLLMClient(base_url=settings.ollama_base_url)
 

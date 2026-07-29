@@ -6,15 +6,18 @@ import { ChatWindow } from "@/components/ChatWindow";
 import { ChatInput } from "@/components/ChatInput";
 import { FileUpload } from "@/components/FileUpload";
 import { ThinkingAnimation } from "@/components/ThinkingAnimation";
+import { Flashcards } from "@/components/Flashcards";
 import { Message } from "@/components/MessageBubble";
 import { Button } from "@/components/ui/button";
-import { X, Rocket, Download, Cpu, Globe, Zap, DollarSign, MessageSquare, FileText, GraduationCap } from "lucide-react";
+import { X, Rocket, Download, Cpu, Globe, Zap, DollarSign, MessageSquare, FileText, GraduationCap, Layers, Server } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_CACHE_KEY = "candi_token_usage";
 const SEARCH_PROVIDER_KEY = "candi_search_provider";
+const LLM_PROVIDER_KEY = "candi_llm_provider";
 
 type SearchProvider = "duckduckgo" | "tavily";
+type LLMProvider = "openai" | "ollama";
 
 interface ThinkingStep {
   id: string;
@@ -27,6 +30,11 @@ interface TokenUsage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+}
+
+interface FlashCard {
+  question: string;
+  answer: string;
 }
 
 function loadTokensFromCache(): TokenUsage {
@@ -49,6 +57,14 @@ function loadSearchProvider(): SearchProvider {
     if (stored === "tavily" || stored === "duckduckgo") return stored;
   } catch {}
   return "duckduckgo";
+}
+
+function loadLlmProvider(): LLMProvider {
+  try {
+    const stored = localStorage.getItem(LLM_PROVIDER_KEY);
+    if (stored === "ollama" || stored === "openai") return stored;
+  } catch {}
+  return "openai";
 }
 
 function formatTokens(n: number): string {
@@ -76,6 +92,10 @@ export default function Home() {
   const [pdfPath,       setPdfPath]       = useState<string | null>(null);
   const [tokenUsage,    setTokenUsage]    = useState<TokenUsage>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
   const [searchProvider, setSearchProvider] = useState<SearchProvider>("duckduckgo");
+  const [llmProvider, setLlmProvider] = useState<LLMProvider>("openai");
+  const [mockMode, setMockMode] = useState(false);
+  const [flashcards, setFlashcards] = useState<FlashCard[]>([]);
+  const [showFlashcards, setShowFlashcards] = useState(false);
 
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([
     { id: "1", icon: "file",      text: "Analyzing your resume...",                  status: "pending" },
@@ -88,7 +108,6 @@ export default function Home() {
     { id: "8", icon: "check",     text: "Preparing your interview guide...",         status: "pending" },
   ]);
 
-  const [mockMode, setMockMode] = useState(false);
   const mockRef     = useRef(false);
 
   const sessionIdRef = useRef(`session_${Date.now()}`);
@@ -97,12 +116,20 @@ export default function Home() {
   useEffect(() => {
     setTokenUsage(loadTokensFromCache());
     setSearchProvider(loadSearchProvider());
+    setLlmProvider(loadLlmProvider());
   }, []);
 
   const chooseSearchProvider = (provider: SearchProvider) => {
     setSearchProvider(provider);
     try {
       localStorage.setItem(SEARCH_PROVIDER_KEY, provider);
+    } catch {}
+  };
+
+  const chooseLlmProvider = (provider: LLMProvider) => {
+    setLlmProvider(provider);
+    try {
+      localStorage.setItem(LLM_PROVIDER_KEY, provider);
     } catch {}
   };
 
@@ -232,6 +259,7 @@ export default function Home() {
           session_id:  sessionIdRef.current,
           resume_text: resumeContent || undefined,
           jd_text:     jdContent     || undefined,
+          llm_provider: llmProvider,
         }),
       });
 
@@ -316,6 +344,31 @@ export default function Home() {
     }
   };
 
+  // ── Flashcards ─────────────────────────────────────────
+
+  const handleToggleFlashcards = async () => {
+    if (showFlashcards) {
+      setShowFlashcards(false);
+      return;
+    }
+    if (flashcards.length) {
+      setShowFlashcards(true);
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/flashcards/${sessionIdRef.current}`);
+      if (!response.ok) throw new Error("No flashcards");
+      const data = await response.json();
+      setFlashcards(data.cards || []);
+      setShowFlashcards(true);
+    } catch {
+      addMessage("assistant", "No flashcards available. Run a preparation first to generate behavioral Q&A.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const canStart = resumeContent && jdContent;
 
   return (
@@ -349,6 +402,18 @@ export default function Home() {
             )}
 
             {/* Mock interview toggle */}
+            {pdfPath && (
+              <Button
+                onClick={handleToggleFlashcards}
+                size="sm"
+                variant={showFlashcards ? "default" : "outline"}
+                className={showFlashcards ? "bg-rose-500 hover:bg-rose-600 text-white" : "border-rose-500/50 text-rose-400 hover:bg-rose-500/10"}
+              >
+                <Layers className="w-4 h-4 mr-1" />
+                {showFlashcards ? "Hide Cards" : "Flashcards"}
+              </Button>
+            )}
+
             {pdfPath && (
               <Button
                 onClick={mockMode ? handleStopMock : handleStartMockInterview}
@@ -422,7 +487,42 @@ export default function Home() {
               <FileUpload type="jd"     label="Job Description"  onFileUploaded={setJdContent}     />
             </div>
 
-            {/* Web search provider picker */}
+            {/* LLM provider picker */}
+            <div className="mt-3">
+              <p className="text-xs text-muted-foreground mb-1.5">LLM provider (chat only)</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => chooseLlmProvider("openai")}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                    llmProvider === "openai"
+                      ? "border-cyan-500 bg-cyan-500/10 text-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Server className="w-4 h-4 shrink-0" />
+                  <span>
+                    <span className="block font-medium">OpenAI</span>
+                    <span className="block text-[10px] text-muted-foreground">API key · paid</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chooseLlmProvider("ollama")}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                    llmProvider === "ollama"
+                      ? "border-cyan-500 bg-cyan-500/10 text-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Layers className="w-4 h-4 shrink-0" />
+                  <span>
+                    <span className="block font-medium">Ollama</span>
+                    <span className="block text-[10px] text-muted-foreground">Local · free</span>
+                  </span>
+                </button>
+              </div>
+            </div>
             <div className="mt-3">
               <p className="text-xs text-muted-foreground mb-1.5">Web search provider</p>
               <div className="grid grid-cols-2 gap-2">
@@ -471,6 +571,11 @@ export default function Home() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Flashcards Panel */}
+      {showFlashcards && flashcards.length > 0 && (
+        <Flashcards cards={flashcards} onClose={() => setShowFlashcards(false)} />
       )}
 
       {/* Chat area */}

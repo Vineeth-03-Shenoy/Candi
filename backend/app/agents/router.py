@@ -6,10 +6,10 @@ Routes messages to either:
 2. FULL_PREPARATION - Research → Strategy → Content → PDF (slow, agentic)
 3. QUICK_QUESTION - Uses context from previous prep but answers quickly
 """
-from typing import Literal
+from typing import Literal, Optional
 
 from app.config import settings
-from app.services.llm_client import create_llm_client
+from app.services.llm_client import create_llm_client, LLMClient
 from app.utils.logger import get_logger
 from app.utils.llm_logger import llm_call
 
@@ -62,8 +62,10 @@ class IntentRouter:
         session_id: str,
         retriever,
         conversation_history: list = None,
+        client: Optional[LLMClient] = None,
     ) -> tuple[str, dict]:
         """Generate a response with context retrieved from the vector store."""
+        _client = client or self.client
         history_len = len(conversation_history) if conversation_history else 0
         log.info("simple_chat_response | session_id=%s | history_messages=%d", session_id, history_len)
 
@@ -90,7 +92,7 @@ class IntentRouter:
         temperature = settings.router_simple_chat_temperature
         log.debug("Calling %s for simple chat (%d total messages)", model, len(messages))
         reply, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=messages,
             max_tokens=max_tokens,
@@ -108,8 +110,10 @@ class IntentRouter:
         jd_text: str = "",
         prep_context: dict = None,
         conversation_history: list = None,
+        client: Optional[LLMClient] = None,
     ) -> tuple[str, dict]:
         """Answer a question with context from the vector store and uploaded docs."""
+        _client = client or self.client
         history_len = len(conversation_history) if conversation_history else 0
         log.info(
             "quick_question_response | session_id=%s | has_resume=%s has_jd=%s has_prep_context=%s | history_messages=%d",
@@ -153,7 +157,7 @@ class IntentRouter:
         temperature = settings.router_quick_qa_temperature
         log.debug("Calling %s for quick question (%d total messages)", model, len(messages))
         reply, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=messages,
             max_tokens=max_tokens,

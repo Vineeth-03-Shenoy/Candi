@@ -20,6 +20,7 @@ from app.agents.strategist import StrategistAgent
 from app.agents.content_gen import ContentGenAgent
 from app.agents.retriever import RetrieverAgent
 from app.services.cache_service import CacheService
+from app.services.llm_client import create_llm_client
 from app.services.pdf_generator import PDFGenerator
 from app.services.search_provider import get_search_provider
 from app.services.session_store import SessionStore
@@ -106,6 +107,7 @@ class ChatMessage(BaseModel):
     session_id: str
     resume_text: Optional[str] = None
     jd_text: Optional[str] = None
+    llm_provider: Optional[Literal["openai", "ollama"]] = None
 
 
 class PrepareRequest(BaseModel):
@@ -216,6 +218,11 @@ async def chat(request: ChatMessage):
             has_jd=bool(session.get("jd_text")),
         )
 
+        # Per-request LLM client override (D.11 — Ollama frontend picker)
+        req_client = None
+        if request.llm_provider and request.llm_provider != settings.llm_provider:
+            req_client = create_llm_client(provider=request.llm_provider)
+
         if intent == "FULL_PREPARATION":
             log.info("Chat redirecting to full preparation | session_id='%s'", request.session_id)
             session_store.save(request.session_id, session)
@@ -237,6 +244,7 @@ async def chat(request: ChatMessage):
                 jd_text=session.get("jd_text", ""),
                 prep_context=session.get("prep_data"),
                 conversation_history=session.get("messages", []),
+                client=req_client,
             )
         else:  # SIMPLE_CHAT
             log.debug("Handling SIMPLE_CHAT | session_id='%s'", request.session_id)
@@ -245,6 +253,7 @@ async def chat(request: ChatMessage):
                 session_id=request.session_id,
                 retriever=retriever,
                 conversation_history=session.get("messages", []),
+                client=req_client,
             )
 
         _add_tokens(session, tokens)
@@ -1041,3 +1050,50 @@ Keep it natural and conversational."""
         "question_number": q_num,
         "token_usage": session["token_usage"],
     }
+
+
+# ── D.13: Flashcards ──────────────────────────────────────────────
+
+@app.get("/api/flashcards/{session_id}")
+async def get_flashcards(session_id: str):
+    """Extract behavioral Q&A pairs as flashcards from prep data."""
+    log.info("GET /api/flashcards/%s", session_id)
+    session = session_store.get(session_id)
+    if not session or not session.get("prep_data"):
+        raise HTTPException(status_code=404, detail="No preparation data found")
+
+    prep = session["prep_data"]
+    data_sources = [
+        prep.get("questions", {}).get("comprehensive_questions", ""),
+        session.get("prep_data", {}).get("behavioral_questions", ""),
+    ]
+
+    cards: list[dict] = []
+    seen: set[str] = set()
+
+    for text in data_sources:
+        if not text:
+            continue
+        blocks = re.split(r"\n(?=\d+\.\s*\*\*Question|\*\*Question|###)", text)
+        for block in blocks:
+            q_match = re.search(
+                r"(?:\d+\.\s*)?\*{0,2}Question\*{0,2}[\s:]+(.+?)(?:\n|$)", block
+            )
+            if not q_match:
+                continue
+            question = q_match.group(1).strip()
+            if len(question) < 10 or question.lower() in seen:
+                continue
+            seen.add(question.lower())
+
+            answer = block[q_match.end():].strip()
+            answer = re.sub(r'\*\*Why They Ask This\*\*', '\n\n**Why They Ask This**', answer)
+            answer = re.sub(r'\*\*Key Points to Cover\*\*', '\n\n**Key Points to Cover**', answer)
+            answer = re.sub(r'\*\*Sample Answer.*?\*\*', '\n\n**Sample Answer**', answer)
+            answer = re.sub(r'\*\*Common Mistakes\*\*', '\n\n**Common Mistakes**', answer)
+            answer = answer[:600]
+
+            cards.append({"question": question, "answer": answer})
+
+    log.info("Flashcards generated | session_id=%s | count=%d", session_id, len(cards))
+    return {"cards": cards, "count": len(cards)}
