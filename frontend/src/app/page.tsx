@@ -484,7 +484,7 @@ export default function Home() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FileUpload type="resume" label="Your Resume"      onFileUploaded={setResumeContent} />
-              <FileUpload type="jd"     label="Job Description"  onFileUploaded={setJdContent}     />
+              <FileUpload type="jd"     label="Job Description"  onFileUploaded={setJdContent}     textInput />
             </div>
 
             {/* LLM provider picker */}

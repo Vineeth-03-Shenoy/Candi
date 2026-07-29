@@ -17,12 +17,14 @@ interface FileUploadProps {
   type: "resume" | "jd";
   label: string;
   onFileUploaded: (content: string) => void;
+  textInput?: boolean;
 }
 
-export function FileUpload({ type, label, onFileUploaded }: FileUploadProps) {
+export function FileUpload({ type, label, onFileUploaded, textInput = false }: FileUploadProps) {
   const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [textValue, setTextValue] = useState("");
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -85,6 +87,35 @@ export function FileUpload({ type, label, onFileUploaded }: FileUploadProps) {
     resume: "from-emerald-500 to-teal-600",
     jd: "from-blue-500 to-indigo-600",
   };
+
+  if (textInput) {
+    return (
+      <Card className="relative p-4 border-2 border-dashed border-muted-foreground/20 hover:border-primary/50 transition-all duration-300">
+        <div className="flex items-center gap-3 mb-2">
+          <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center bg-gradient-to-br", gradients[type])}>
+            <FileText className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-medium">{label}</p>
+            <p className="text-xs text-muted-foreground">Paste the job description below</p>
+          </div>
+        </div>
+        <textarea
+          value={textValue}
+          onChange={(e) => {
+            setTextValue(e.target.value);
+            onFileUploaded(e.target.value);
+          }}
+          placeholder="Paste the full job description here..."
+          rows={6}
+          className="w-full rounded-md border bg-muted/50 p-3 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        {textValue && (
+          <p className="text-xs text-muted-foreground mt-1 text-right">{textValue.length} chars</p>
+        )}
+      </Card>
+    );
+  }
 
   return (
     <Card
