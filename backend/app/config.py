@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # near-instant and cost $0.
     cache_ttl_days: int = 7
 
+    # ── Embeddings (vector store) ────────────────────────────────────
+    # "local" uses ChromaDB's free all-MiniLM-L6-v2 ONNX model (default).
+    # Set to an OpenAI model name (e.g. "text-embedding-3-small") to use
+    # the OpenAI API instead (costs ~$0.00002 per 1K tokens).
+    embedding_model: str = "local"
+
     # ── Router Agent ─────────────────────────────────────────────────
     router_simple_chat_model: str = "gpt-4o-mini"
     router_simple_chat_max_tokens: int = 500

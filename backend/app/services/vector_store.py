@@ -3,7 +3,7 @@ Vector Store Service — ChromaDB wrapper for RAG
 
 Handles:
   - Chunking strategies (role-agnostic, not domain-specific)
-  - Embedding with OpenAI text-embedding-3-small
+  - Embedding with ChromaDB's local all-MiniLM-L6-v2 ONNX model (free, $0)
   - Persistent ChromaDB storage (backend/chroma_db/)
   - Per-session collections
 """
@@ -13,10 +13,13 @@ from typing import Optional
 
 import chromadb
 from chromadb.config import Settings
+from chromadb.utils import embedding_functions
 
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
+
+_DEFAULT_EMBEDDING_FN = embedding_functions.DefaultEmbeddingFunction()
 
 
 def _get_chroma_client():
@@ -48,12 +51,16 @@ class VectorStore:
         """Get or create a collection for the session."""
         collection_name = f"session_{session_id}"
         try:
-            collection = self.client.get_collection(name=collection_name)
+            collection = self.client.get_collection(
+                name=collection_name,
+                embedding_function=_DEFAULT_EMBEDDING_FN,
+            )
             log.debug("Retrieved existing collection | session_id=%s", session_id)
         except Exception:
             collection = self.client.create_collection(
                 name=collection_name,
                 metadata={"session_id": session_id},
+                embedding_function=_DEFAULT_EMBEDDING_FN,
             )
             log.info("Created new collection | session_id=%s", session_id)
         return collection
