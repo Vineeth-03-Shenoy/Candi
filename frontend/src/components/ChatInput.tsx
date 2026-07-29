@@ -11,6 +11,7 @@ interface ChatInputProps {
   onToggleUpload: () => void;
   isLoading?: boolean;
   showUploadHint?: boolean;
+  mockMode?: boolean;
 }
 
 export function ChatInput({
@@ -18,6 +19,7 @@ export function ChatInput({
   onToggleUpload,
   isLoading = false,
   showUploadHint = false,
+  mockMode = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
 
@@ -54,9 +56,14 @@ export function ChatInput({
         <Input
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder="Ask about interview preparation..."
+          placeholder={mockMode ? "Type your answer to the interviewer..." : "Ask about interview preparation..."}
           disabled={isLoading}
-          className="flex-1 bg-muted/50 border-0 focus-visible:ring-1 focus-visible:ring-primary"
+          className={cn(
+            "flex-1 bg-muted/50 border-0 focus-visible:ring-1",
+            mockMode
+              ? "focus-visible:ring-amber-500 border-amber-500/30"
+              : "focus-visible:ring-primary"
+          )}
         />
 
         <Button

@@ -16,6 +16,7 @@ via model_dump(); they come back as plain dicts, which every current
 consumer (prompt context, str(...) fallback) already handles.
 """
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -117,6 +118,37 @@ class SessionStore:
             conn.close()
         log.info("Session delete | session_id=%s | existed=%s", session_id, deleted)
         return deleted
+
+    # ------------------------------------------------------------------
+    # Listing
+    # ------------------------------------------------------------------
+
+    def list_all(self) -> list[dict]:
+        """Return all sessions with basic metadata (no full data blob)."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT session_id, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 50"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        sessions: list[dict] = []
+        for session_id, updated_at in rows:
+            data = self.get(session_id)
+            if data is None:
+                continue
+            sessions.append({
+                "session_id":    session_id,
+                "updated_at":    updated_at,
+                "has_prep":      bool(data.get("prep_data")),
+                "message_count": len(data.get("messages", [])),
+                "token_usage":   data.get("token_usage", {}),
+                "has_pdf":       bool(data.get("pdf_path")),
+                "pdf_filename":  os.path.basename(data.get("pdf_path", "") or ""),
+            })
+        log.debug("Listed sessions | count=%d", len(sessions))
+        return sessions
 
     # ------------------------------------------------------------------
     # TTL cleanup

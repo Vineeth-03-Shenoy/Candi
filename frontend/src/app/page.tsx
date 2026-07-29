@@ -8,7 +8,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { ThinkingAnimation } from "@/components/ThinkingAnimation";
 import { Message } from "@/components/MessageBubble";
 import { Button } from "@/components/ui/button";
-import { X, Rocket, Download, Cpu, Globe, Zap } from "lucide-react";
+import { X, Rocket, Download, Cpu, Globe, Zap, DollarSign, MessageSquare, FileText, GraduationCap } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_CACHE_KEY = "candi_token_usage";
@@ -57,6 +57,15 @@ function formatTokens(n: number): string {
   return n.toString();
 }
 
+// ── D.2 Cost estimation ────────────────────────────────────
+// Blended rate: ~$0.50/1K tokens (weighted mix of gpt-4o-mini + gpt-4o calls)
+function estimateCost(usage: TokenUsage): string {
+  const k = usage.total_tokens / 1000;
+  const cost = k * 0.50;  // cents, not dollars
+  if (cost < 1) return "<$0.01";
+  return `$${(cost / 100).toFixed(2)}`;
+}
+
 export default function Home() {
   const [messages,      setMessages]      = useState<Message[]>([]);
   const [isLoading,     setIsLoading]     = useState(false);
@@ -74,9 +83,13 @@ export default function Home() {
     { id: "3", icon: "search",    text: "Researching company interview patterns...", status: "pending" },
     { id: "4", icon: "brain",     text: "Identifying likely interview rounds...",    status: "pending" },
     { id: "5", icon: "lightbulb", text: "Creating preparation strategy...",          status: "pending" },
-    { id: "6", icon: "lightbulb", text: "Generating tailored questions...",          status: "pending" },
-    { id: "7", icon: "check",     text: "Preparing your interview guide...",         status: "pending" },
+    { id: "6", icon: "brain",     text: "Analyzing role seniority fit...",           status: "pending" },
+    { id: "7", icon: "lightbulb", text: "Generating tailored questions...",          status: "pending" },
+    { id: "8", icon: "check",     text: "Preparing your interview guide...",         status: "pending" },
   ]);
+
+  const [mockMode, setMockMode] = useState(false);
+  const mockRef     = useRef(false);
 
   const sessionIdRef = useRef(`session_${Date.now()}`);
 
@@ -186,6 +199,27 @@ export default function Home() {
   };
 
   const handleSendMessage = async (content: string) => {
+    if (mockMode) {
+      addMessage("user", content);
+      setIsLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/api/mock-interview/evaluate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionIdRef.current }),
+        });
+        if (!response.ok) throw new Error("Evaluation failed");
+        const data = await response.json();
+        updateTokenUsage(data.token_usage);
+        addMessage("assistant", data.message);
+      } catch {
+        addMessage("assistant", "I'm having trouble evaluating your answer. Let's try again.");
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     addMessage("user", content);
     setIsLoading(true);
 
@@ -227,6 +261,61 @@ export default function Home() {
     }
   };
 
+  // ── Mock interview ────────────────────────────────────────
+
+  const handleStartMockInterview = async () => {
+    setMockMode(true);
+    mockRef.current = true;
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/mock-interview/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionIdRef.current }),
+      });
+      if (!response.ok) throw new Error("Failed to start mock interview");
+      const data = await response.json();
+      updateTokenUsage(data.token_usage);
+      addMessage("assistant", data.message);
+    } catch {
+      addMessage("assistant", "I couldn't start the mock interview. Make sure you've run a preparation first.");
+      setMockMode(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStopMock = () => {
+    setMockMode(false);
+    mockRef.current = false;
+    addMessage("assistant", "Mock interview ended. Great work! Review the feedback above and practice more when you're ready.");
+  };
+
+  // ── Export helpers ────────────────────────────────────────
+
+  const handleExportMarkdown = () => {
+    window.open(`${API_URL}/api/export/${sessionIdRef.current}/markdown`, "_blank");
+  };
+
+  const handleGenerateCoverLetter = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/cover-letter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionIdRef.current }),
+      });
+      if (!response.ok) throw new Error("Cover letter generation failed");
+      const data = await response.json();
+      updateTokenUsage(data.token_usage);
+      addMessage("assistant", "**Your Cover Letter**\n\n" + data.cover_letter);
+    } catch {
+      addMessage("assistant", "I couldn't generate a cover letter. Have you run a preparation first?");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const canStart = resumeContent && jdContent;
 
   return (
@@ -243,9 +332,9 @@ export default function Home() {
             className="h-8 sm:h-10 md:h-12 w-auto"
             priority
           />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
 
-            {/* Token usage badge */}
+            {/* Token usage + cost badge */}
             {tokenUsage.total_tokens > 0 && (
               <div
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted border text-xs text-muted-foreground"
@@ -253,7 +342,51 @@ export default function Home() {
               >
                 <Cpu className="w-3 h-3 shrink-0" />
                 <span>{formatTokens(tokenUsage.total_tokens)} tokens</span>
+                <span className="text-cyan-500">·</span>
+                <DollarSign className="w-3 h-3 shrink-0 text-emerald-400" />
+                <span className="text-emerald-400">{estimateCost(tokenUsage)}</span>
               </div>
+            )}
+
+            {/* Mock interview toggle */}
+            {pdfPath && (
+              <Button
+                onClick={mockMode ? handleStopMock : handleStartMockInterview}
+                size="sm"
+                variant={mockMode ? "destructive" : "outline"}
+                className={mockMode ? "" : "border-amber-500/50 text-amber-400 hover:bg-amber-500/10"}
+                disabled={isLoading}
+              >
+                <GraduationCap className="w-4 h-4 mr-1" />
+                {mockMode ? "Stop Mock" : "Mock Interview"}
+              </Button>
+            )}
+
+            {/* Export markdown */}
+            {pdfPath && (
+              <Button
+                onClick={handleExportMarkdown}
+                size="sm"
+                variant="outline"
+                className="border-slate-500/50 text-slate-400 hover:bg-slate-500/10"
+              >
+                <FileText className="w-4 h-4 mr-1" />
+                .md
+              </Button>
+            )}
+
+            {/* Cover letter */}
+            {pdfPath && (
+              <Button
+                onClick={handleGenerateCoverLetter}
+                size="sm"
+                variant="outline"
+                disabled={isLoading}
+                className="border-violet-500/50 text-violet-400 hover:bg-violet-500/10"
+              >
+                <MessageSquare className="w-4 h-4 mr-1" />
+                Cover Letter
+              </Button>
             )}
 
             {pdfPath && (
@@ -354,6 +487,7 @@ export default function Home() {
         onToggleUpload={() => setShowUpload(prev => !prev)}
         isLoading={isLoading}
         showUploadHint={!showUpload && !resumeContent}
+        mockMode={mockMode}
       />
     </div>
   );
