@@ -65,7 +65,7 @@ export function SessionSidebar({
   };
 
   return (
-    <div className="w-64 border-r bg-muted/20 flex flex-col h-full">
+    <div className="w-72 border-r bg-muted/20 flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-3 border-b">
         <h2 className="text-sm font-semibold">Conversations</h2>
         <div className="flex items-center gap-1">
