@@ -120,10 +120,10 @@ export function SessionSidebar({
                 </div>
                 <button
                   onClick={(e) => handleDelete(e, s.session_id)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10"
+                  className="p-1 rounded hover:bg-destructive/10"
                   title="Delete session"
                 >
-                  <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
+                  <Trash2 className="w-3 h-3 text-muted-foreground/50 hover:text-destructive" />
                 </button>
               </div>
             </div>
