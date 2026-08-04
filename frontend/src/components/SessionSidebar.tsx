@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Plus, MessageSquare, FileText, Trash2, PanelLeftClose } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const WIDTH_STORAGE_KEY = "candi_sidebar_width_pct";
 
 interface SessionMeta {
   session_id: string;
@@ -25,6 +26,21 @@ interface SessionSidebarProps {
   onClose: () => void;
 }
 
+function loadWidth(): number {
+  try {
+    const v = localStorage.getItem(WIDTH_STORAGE_KEY);
+    if (v) {
+      const pct = parseFloat(v);
+      if (pct >= 10 && pct <= 40) return pct;
+    }
+  } catch {}
+  return 20;
+}
+
+function saveWidth(pct: number) {
+  try { localStorage.setItem(WIDTH_STORAGE_KEY, String(pct)); } catch {}
+}
+
 export function SessionSidebar({
   activeSessionId,
   onSelectSession,
@@ -32,6 +48,8 @@ export function SessionSidebar({
   onClose,
 }: SessionSidebarProps) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [widthPct, setWidthPct] = useState(loadWidth);
+  const resizing = useRef(false);
 
   const loadSessions = async () => {
     try {
@@ -43,9 +61,7 @@ export function SessionSidebar({
     } catch {}
   };
 
-  useEffect(() => {
-    loadSessions();
-  }, [activeSessionId]);
+  useEffect(() => { loadSessions(); }, [activeSessionId]);
 
   const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
@@ -54,6 +70,37 @@ export function SessionSidebar({
       setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
     } catch {}
   };
+
+  // ── Resize logic ─────────────────────────────────────────
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizing.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const pct = (e.clientX / window.innerWidth) * 100;
+      const clamped = Math.min(40, Math.max(10, pct));
+      setWidthPct(clamped);
+      saveWidth(clamped);
+    };
+    const onUp = () => {
+      if (!resizing.current) return;
+      resizing.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
 
   const formatTime = (ts: number) => {
     const d = new Date(ts * 1000);
@@ -64,11 +111,19 @@ export function SessionSidebar({
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
+  const widthPx = `${widthPct}vw`;
+
   return (
-    <div className="w-72 border-r bg-muted/20 flex flex-col h-full">
+    <div className="border-r bg-muted/20 flex flex-col h-full relative flex-shrink-0" style={{ width: widthPx }}>
+      {/* Resize handle */}
+      <div
+        className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-10 hover:bg-primary/30 transition-colors"
+        onMouseDown={onMouseDown}
+      />
+
       <div className="flex items-center justify-between px-3 py-3 border-b">
-        <h2 className="text-sm font-semibold">Conversations</h2>
-        <div className="flex items-center gap-1">
+        <h2 className="text-sm font-semibold truncate">Conversations</h2>
+        <div className="flex items-center gap-1 shrink-0">
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onNewSession} title="New session">
             <Plus className="w-4 h-4" />
           </Button>
@@ -120,7 +175,7 @@ export function SessionSidebar({
                 </div>
                 <button
                   onClick={(e) => handleDelete(e, s.session_id)}
-                  className="p-1 rounded hover:bg-destructive/10"
+                  className="p-1 rounded hover:bg-destructive/10 shrink-0"
                   title="Delete session"
                 >
                   <Trash2 className="w-3 h-3 text-muted-foreground/50 hover:text-destructive" />
