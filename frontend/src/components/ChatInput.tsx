@@ -25,13 +25,18 @@ export function ChatInput({
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [attaching, setAttaching] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (message.trim() && !isLoading) {
-      onSendMessage(message.trim());
+      const msg = attachedFile
+        ? `${message}\n\n[Attached: ${attachedFile.name}]\n${attachedFile.content}`
+        : message;
+      onSendMessage(msg.trim());
       setMessage("");
+      setAttachedFile(null);
     }
   };
 
@@ -49,12 +54,7 @@ export function ChatInput({
       if (!res.ok) throw new Error("Failed to extract text");
       const data = await res.json();
       if (data.success) {
-        const preview = data.text.slice(0, 3000);
-        setMessage((prev) =>
-          prev
-            ? `${prev}\n\n[Attached: ${file.name}]\n${preview}${data.text.length > 3000 ? "\n...(truncated)" : ""}`
-            : `[Attached: ${file.name}]\n${preview}${data.text.length > 3000 ? "\n...(truncated)" : ""}`
-        );
+        setAttachedFile({ name: file.name, content: data.text.slice(0, 4000) });
       }
     } catch {
       // silently fail
@@ -108,6 +108,21 @@ export function ChatInput({
           onChange={handleFileAttach}
           className="hidden"
         />
+
+        {attachedFile && (
+          <div className="flex items-center gap-2 mx-auto max-w-3xl px-1 pb-2">
+            <span className="text-[11px] text-muted-foreground bg-muted/50 rounded px-2 py-0.5">
+              📎 {attachedFile.name} ({(attachedFile.content.length / 1024).toFixed(1)}KB)
+            </span>
+            <button
+              type="button"
+              onClick={() => setAttachedFile(null)}
+              className="text-[10px] text-muted-foreground hover:text-destructive"
+            >
+              ✕ remove
+            </button>
+          </div>
+        )}
 
         <Input
           value={message}

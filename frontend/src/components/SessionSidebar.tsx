@@ -81,11 +81,14 @@ export function SessionSidebar({
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-1">
           {sessions.map((s) => (
-            <button
+            <div
               key={s.session_id}
               onClick={() => onSelectSession(s.session_id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter") onSelectSession(s.session_id); }}
               className={cn(
-                "w-full text-left px-3 py-2 rounded-lg text-xs transition-colors group",
+                "w-full text-left px-3 py-2 rounded-lg text-xs transition-colors group cursor-pointer",
                 s.session_id === activeSessionId
                   ? "bg-primary/10 border border-primary/30"
                   : "hover:bg-muted border border-transparent"
@@ -123,7 +126,7 @@ export function SessionSidebar({
                   <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive" />
                 </button>
               </div>
-            </button>
+            </div>
           ))}
 
           {sessions.length === 0 && (
