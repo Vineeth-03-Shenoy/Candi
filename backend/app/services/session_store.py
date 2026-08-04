@@ -37,6 +37,30 @@ def _json_default(obj):
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def _session_display_name(data: dict) -> str:
+    """Extract a human-readable name from session prep data (company + role)."""
+    prep = data.get("prep_data")
+    if not prep:
+        msgs = data.get("messages", [])
+        first = next((m["content"] for m in msgs if m["role"] == "user"), "")
+        return first[:40] + ("..." if len(first) > 40 else "") or "Empty session"
+    jd = prep.get("jd_analysis", {})
+    company = jd.get("jd_info")
+    if hasattr(company, "company_name"):
+        company = company.company_name
+    elif isinstance(company, dict):
+        company = company.get("company_name", "")
+    company = (company or "").strip()
+    role = jd.get("jd_analysis", "")
+    if role and len(role) > 80:
+        import re
+        m = re.search(r"\*\*Role Title\*\*[:\s]+([^\n]+)", role)
+        role = (m.group(1) if m else role[:80]).strip()
+    if company and role and role != company:
+        return f"{company} — {role}"
+    return company or role or "Prep session"
+
+
 class SessionStore:
     """Tiny SQLite key-value store for session state."""
 
@@ -146,6 +170,7 @@ class SessionStore:
                 "token_usage":   data.get("token_usage", {}),
                 "has_pdf":       bool(data.get("pdf_path")),
                 "pdf_filename":  os.path.basename(data.get("pdf_path", "") or ""),
+                "display_name":  _session_display_name(data),
             })
         log.debug("Listed sessions | count=%d", len(sessions))
         return sessions

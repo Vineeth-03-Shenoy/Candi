@@ -674,6 +674,23 @@ async def get_session(session_id: str):
     return result
 
 
+@app.get("/api/session/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """Get the full message history of a session."""
+    log.debug("GET /api/session/%s/messages", session_id)
+    session = session_store.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session_id,
+        "messages":   session.get("messages", []),
+        "has_prep":   bool(session.get("prep_data")),
+        "has_resume": bool(session.get("resume_text")),
+        "has_jd":     bool(session.get("jd_text")),
+        "token_usage": session.get("token_usage", _blank_tokens()),
+    }
+
+
 @app.delete("/api/session/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session and its Chroma vector-store collection."""

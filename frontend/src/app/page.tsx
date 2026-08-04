@@ -7,9 +7,10 @@ import { ChatInput } from "@/components/ChatInput";
 import { FileUpload } from "@/components/FileUpload";
 import { ThinkingAnimation } from "@/components/ThinkingAnimation";
 import { Flashcards } from "@/components/Flashcards";
+import { SessionSidebar } from "@/components/SessionSidebar";
 import { Message } from "@/components/MessageBubble";
 import { Button } from "@/components/ui/button";
-import { X, Rocket, Download, Cpu, Globe, Zap, DollarSign, MessageSquare, FileText, GraduationCap, Layers, Server } from "lucide-react";
+import { X, Rocket, Download, Cpu, Globe, Zap, DollarSign, MessageSquare, FileText, GraduationCap, Layers, Server, PanelLeft } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_CACHE_KEY = "candi_token_usage";
@@ -96,6 +97,7 @@ export default function Home() {
   const [mockMode, setMockMode] = useState(false);
   const [flashcards, setFlashcards] = useState<FlashCard[]>([]);
   const [showFlashcards, setShowFlashcards] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
 
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([
     { id: "1", icon: "file",      text: "Analyzing your resume...",                  status: "pending" },
@@ -369,10 +371,76 @@ export default function Home() {
     }
   };
 
+  // ── Session switching ────────────────────────────────────
+
+  const handleSelectSession = async (sessionId: string) => {
+    if (sessionId === sessionIdRef.current) return;
+    sessionIdRef.current = sessionId;
+    setIsLoading(true);
+    setPdfPath(null);
+    setFlashcards([]);
+    setShowFlashcards(false);
+    setMockMode(false);
+    setShowUpload(false);
+    setTokenUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+
+    try {
+      const res = await fetch(`${API_URL}/api/session/${sessionId}/messages`);
+      if (!res.ok) throw new Error("Failed to load");
+      const data = await res.json();
+      const loaded: Message[] = (data.messages || []).map((m: any, i: number) => ({
+        id: `${sessionId}-${i}`,
+        role: m.role,
+        content: m.content,
+        timestamp: new Date(),
+      }));
+      setMessages(loaded);
+      if (data.has_resume) setResumeContent("(loaded from session)");
+      if (data.has_jd) setJdContent("(loaded from session)");
+      if (data.has_prep) {
+        const s = await fetch(`${API_URL}/api/session/${sessionId}`);
+        if (s.ok) {
+          const sd = await s.json();
+          setTokenUsage(sd.token_usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+        }
+      }
+    } catch {
+      // fallback
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleNewSession = () => {
+    const id = `session_${Date.now()}`;
+    sessionIdRef.current = id;
+    setMessages([]);
+    setPdfPath(null);
+    setTokenUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+    setResumeContent("");
+    setJdContent("");
+    setMockMode(false);
+    setFlashcards([]);
+    setShowFlashcards(false);
+    setShowUpload(true);
+    setShowSidebar(false);
+  };
+
   const canStart = resumeContent && jdContent;
 
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
+    <div className="flex h-screen bg-background overflow-hidden">
+      {/* Sidebar */}
+      {showSidebar && (
+        <SessionSidebar
+          activeSessionId={sessionIdRef.current}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          onClose={() => setShowSidebar(false)}
+        />
+      )}
+
+      <div className="flex flex-col flex-1 overflow-hidden">
 
       {/* Header */}
       <header className="flex-shrink-0 border-b px-4 py-3 bg-background/80 backdrop-blur-xl z-10">
@@ -386,6 +454,17 @@ export default function Home() {
             priority
           />
           <div className="flex items-center gap-2 flex-wrap justify-end">
+
+            {/* Sidebar toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setShowSidebar((prev) => !prev)}
+              title="Conversations"
+            >
+              <PanelLeft className="w-4 h-4" />
+            </Button>
 
             {/* Token usage + cost badge */}
             {tokenUsage.total_tokens > 0 && (
@@ -594,6 +673,7 @@ export default function Home() {
         showUploadHint={!showUpload && !resumeContent}
         mockMode={mockMode}
       />
+    </div>
     </div>
   );
 }

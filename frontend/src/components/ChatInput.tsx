@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useRef, FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send, Paperclip, Loader2 } from "lucide-react";
+import { Send, Paperclip, FileUp, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
@@ -22,12 +24,43 @@ export function ChatInput({
   mockMode = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
+  const [attaching, setAttaching] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (message.trim() && !isLoading) {
       onSendMessage(message.trim());
       setMessage("");
+    }
+  };
+
+  const handleFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttaching(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_URL}/api/extract-text`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Failed to extract text");
+      const data = await res.json();
+      if (data.success) {
+        const preview = data.text.slice(0, 3000);
+        setMessage((prev) =>
+          prev
+            ? `${prev}\n\n[Attached: ${file.name}]\n${preview}${data.text.length > 3000 ? "\n...(truncated)" : ""}`
+            : `[Attached: ${file.name}]\n${preview}${data.text.length > 3000 ? "\n...(truncated)" : ""}`
+        );
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setAttaching(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
@@ -52,6 +85,29 @@ export function ChatInput({
             <span className="absolute -top-1 -right-1 w-2 h-2 bg-primary rounded-full animate-pulse" />
           )}
         </Button>
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => fileRef.current?.click()}
+          disabled={isLoading || attaching}
+          className="flex-shrink-0 text-muted-foreground hover:text-foreground"
+          title="Attach a file for context"
+        >
+          {attaching ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <FileUp className="w-4 h-4" />
+          )}
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".txt,.pdf"
+          onChange={handleFileAttach}
+          className="hidden"
+        />
 
         <Input
           value={message}
