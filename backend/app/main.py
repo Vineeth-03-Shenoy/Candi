@@ -450,6 +450,41 @@ async def generate_prep_events(
             role=role_name, company=company_name,
         )
 
+        # ── Early exit if underqualified ──
+        s_text = seniority.get("seniority_analysis", "")
+        underqualified = bool(re.search(
+            r'\*\*Match Assessment\*\*[:\s]*.*\b(Underqualified|Significantly Below|Not a Match)\b',
+            s_text, re.IGNORECASE,
+        ))
+        if underqualified:
+            log.info("Early exit: candidate underqualified | session_id='%s'", session_id)
+            yield f"data: {json.dumps({'step': 'early_exit', 'status': 'active', 'message': 'Skipping full prep — role may be out of reach. Reviewing your profile first...'})}\n\n"
+
+            pdf_path = pdf_gen.generate_prep_guide(
+                company_name=company_name,
+                role_name=role_name,
+                resume_analysis=resume_analysis,
+                jd_analysis=jd_analysis,
+                rounds={"rounds_breakdown": "", "estimated_rounds": 0},
+                strategy={"preparation_strategy": ""},
+                questions={"comprehensive_questions": ""},
+                seniority_analysis=seniority,
+                resume_improvement=resume_improve,
+                salary_analysis=salary,
+                early_exit=True,
+            )
+
+            session["prep_data"] = {
+                "resume_analysis": resume_analysis,
+                "jd_analysis":     jd_analysis,
+                "seniority":       seniority,
+            }
+            session["pdf_path"] = pdf_path
+            session_store.save(session_id, session)
+
+            yield f"data: {json.dumps({'step': 'complete', 'summary': f'**Preliminary Analysis Ready**\\n\\nBased on our analysis, this role may be out of reach right now. I have prepared a short guide with:\\n- Your profile review\\n- Job requirements\\n- Resume improvement suggestions\\n- Salary expectations\\n\\nReview these, strengthen your profile, and run the full preparation when ready.', 'pdf_path': pdf_path, 'token_usage': session['token_usage']})}\n\n"
+            return
+
         # ── Step 7: Resume improvement ──
         log.info("Pipeline step 7/10 — resume improvement | session_id='%s'", session_id)
         yield f"data: {json.dumps({'step': 7, 'status': 'active', 'message': 'Analyzing resume improvement opportunities...'})}\n\n"

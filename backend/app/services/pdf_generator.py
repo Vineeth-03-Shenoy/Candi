@@ -77,6 +77,7 @@ class PDFGenerator:
         seniority_analysis: dict = None,
         resume_improvement: dict = None,
         salary_analysis: dict = None,
+        early_exit: bool = False,
     ) -> str:
         """
         Generate a comprehensive interview prep guide PDF.
@@ -124,7 +125,7 @@ class PDFGenerator:
 
         # Resume analysis
         log.debug("Adding resume analysis section")
-        story.append(Paragraph("Your Profile Analysis", self.styles["SectionTitle"]))
+        story.append(Paragraph("1. Your Profile Analysis", self.styles["SectionTitle"]))
         story.append(Paragraph(
             self._clean_markdown(resume_analysis.get("resume_analysis", "Not available")),
             self.styles["CustomBodyText"],
@@ -133,52 +134,71 @@ class PDFGenerator:
 
         # JD analysis
         log.debug("Adding JD analysis section")
-        story.append(Paragraph("Job Requirements Analysis", self.styles["SectionTitle"]))
+        story.append(Paragraph("2. Job Requirements Analysis", self.styles["SectionTitle"]))
         story.append(Paragraph(
             self._clean_markdown(jd_analysis.get("jd_analysis", "Not available")),
             self.styles["CustomBodyText"],
         ))
+
+        # Resume improvement — prominent, right after JD on same page
+        if resume_improvement:
+            log.debug("Adding resume improvement section")
+            story.append(Spacer(1, 0.3 * inch))
+            story.append(Paragraph("3. Resume Improvement Suggestions", self.styles["SectionTitle"]))
+            story.append(Paragraph(
+                self._clean_markdown(resume_improvement.get("resume_improvement", "Not available")),
+                self.styles["CustomBodyText"],
+            ))
+
+        # Seniority analysis
+        if seniority_analysis:
+            story.append(Spacer(1, 0.3 * inch))
+            story.append(Paragraph("4. Role Fit & Seniority", self.styles["SectionTitle"]))
+            story.append(Paragraph(
+                self._clean_markdown(seniority_analysis.get("seniority_analysis", "Not available")),
+                self.styles["CustomBodyText"],
+            ))
+
+        # Salary — placed near seniority
+        if salary_analysis:
+            story.append(Spacer(1, 0.3 * inch))
+            story.append(Paragraph("5. Salary & Compensation Insights", self.styles["SectionTitle"]))
+            story.append(Paragraph(
+                self._clean_markdown(salary_analysis.get("salary_analysis", "Not available")),
+                self.styles["CustomBodyText"],
+            ))
+
+        # Early exit: stop here if candidate is underqualified
+        if early_exit:
+            story.append(Spacer(1, 0.5 * inch))
+            story.append(Paragraph(
+                "This is a preliminary analysis. The full preparation guide was not generated "
+                "because your profile doesn't yet match the role requirements. Review these "
+                "suggestions, improve your resume, and run the preparation again when ready.",
+                ParagraphStyle(
+                    name="EarlyExit",
+                    parent=self.styles["Normal"],
+                    fontSize=10,
+                    textColor=HexColor("#f59e0b"),
+                    alignment=TA_CENTER,
+                ),
+            ))
+            log.info("PDF generated (early exit) | company='%s' | role='%s'", company_name, role_name)
+            doc.build(story)
+            file_size_kb = os.path.getsize(filepath) // 1024
+            log.info("PDF generated | file='%s' | size=%d KB", filename, file_size_kb)
+            return filepath
+
         story.append(PageBreak())
 
         # Interview rounds
         log.debug("Adding interview rounds section")
-        story.append(Paragraph("Expected Interview Rounds", self.styles["SectionTitle"]))
+        story.append(Paragraph("Interview Rounds", self.styles["SectionTitle"]))
         story.append(Paragraph(
             self._clean_markdown(rounds.get("rounds_breakdown", "Not available")),
             self.styles["CustomBodyText"],
         ))
         story.append(Spacer(1, 0.3 * inch))
-
-        # Resume improvement
-        if resume_improvement:
-            log.debug("Adding resume improvement section")
-            story.append(Paragraph("Resume Improvement Suggestions", self.styles["SectionTitle"]))
-            story.append(Paragraph(
-                self._clean_markdown(resume_improvement.get("resume_improvement", "Not available")),
-                self.styles["CustomBodyText"],
-            ))
-            story.append(Spacer(1, 0.3 * inch))
-
-        # Seniority analysis & salary negotiation
-        if seniority_analysis:
-            log.debug("Adding seniority analysis section")
-            story.append(Paragraph("Role Fit & Salary Negotiation", self.styles["SectionTitle"]))
-            story.append(Paragraph(
-                self._clean_markdown(seniority_analysis.get("seniority_analysis", "Not available")),
-                self.styles["CustomBodyText"],
-            ))
-            if not behavioral_questions and not technical_questions:
-                story.append(Spacer(1, 0.3 * inch))
-
-        # Salary negotiation
-        if salary_analysis:
-            log.debug("Adding salary analysis section")
-            story.append(Paragraph("Salary & Compensation Insights", self.styles["SectionTitle"]))
-            story.append(Paragraph(
-                self._clean_markdown(salary_analysis.get("salary_analysis", "Not available")),
-                self.styles["CustomBodyText"],
-            ))
-            story.append(Spacer(1, 0.3 * inch))
 
         # Preparation strategy
         log.debug("Adding preparation strategy section")
