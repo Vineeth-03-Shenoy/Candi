@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     content_technical_max_tokens: int = 3000
     content_technical_temperature: float = 0.5
 
+    # ── Researcher — resume improvement (NEW) ───────────────────────
+    researcher_resume_improve_model: str = "gpt-4o-mini"
+    researcher_resume_improve_max_tokens: int = 800
+    researcher_resume_improve_temperature: float = 0.4
+
+    # ── Researcher — salary research (NEW) ──────────────────────────
+    researcher_salary_model: str = "gpt-4o-mini"
+    researcher_salary_max_tokens: int = 500
+    researcher_salary_temperature: float = 0.3
+
     @model_validator(mode="after")
     def _require_openai_key_for_openai_provider(self) -> "Settings":
         if self.llm_provider == "openai" and not self.openai_api_key.strip():

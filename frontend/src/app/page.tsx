@@ -106,8 +106,10 @@ export default function Home() {
     { id: "4", icon: "brain",     text: "Identifying likely interview rounds...",    status: "pending" },
     { id: "5", icon: "lightbulb", text: "Creating preparation strategy...",          status: "pending" },
     { id: "6", icon: "brain",     text: "Analyzing role seniority fit...",           status: "pending" },
-    { id: "7", icon: "lightbulb", text: "Generating tailored questions...",          status: "pending" },
-    { id: "8", icon: "check",     text: "Preparing your interview guide...",         status: "pending" },
+    { id: "7", icon: "file",      text: "Generating resume improvement tips...",     status: "pending" },
+    { id: "8", icon: "search",    text: "Researching salary data...",                status: "pending" },
+    { id: "9", icon: "lightbulb", text: "Generating tailored questions...",          status: "pending" },
+    { id: "10", icon: "check",    text: "Preparing your interview guide...",         status: "pending" },
   ]);
 
   const mockRef     = useRef(false);

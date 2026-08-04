@@ -373,6 +373,129 @@ Resume:
             "_tokens":         tokens,
         }
 
+    async def research_resume_improvement(
+        self, jd_text: str, resume_text: str, company_name: str, role: str,
+        search: SearchProvider,
+    ) -> dict:
+        """Search for resume best practices + market standards, then synthesise improvement tips."""
+        log.info("Researching resume improvement | company='%s' | role='%s'", company_name, role)
+
+        tips_search, standards_search = await asyncio.gather(
+            search.search(f"{role} resume tips common mistakes improve", max_results=4),
+            search.search(f"{role} current market standards skills resume 2025", max_results=3),
+        )
+
+        snippets = "\n".join(
+            f"- {r['title']}: {r['snippet']}"
+            for r in (tips_search + standards_search) if r.get("snippet")
+        )[:3000]
+
+        prompt = f"""Compare this job description to the candidate's resume and suggest specific improvements.
+
+## Job Requirements
+{jd_text[:1500]}
+
+## Candidate Resume
+{resume_text[:1500]}
+
+## Web Research on Resume Best Practices
+{snippets}
+
+Provide:
+1. **Key Gaps**: 2-3 areas where the resume doesn't address JD requirements
+2. **Skills to Add**: Specific skills/technologies to include based on the JD
+3. **Achievement Framing**: How to rephrase existing experience with impact metrics
+4. **Keyword Optimization**: Action verbs and industry terms the ATS will scan for
+5. **Format Tips**: Quick improvements to resume structure
+
+Be specific and actionable — reference actual JD requirements and the candidate's real experience."""
+
+        model       = settings.researcher_resume_improve_model
+        max_tokens  = settings.researcher_resume_improve_max_tokens
+        temperature = settings.researcher_resume_improve_temperature
+        result, tokens = await llm_call(
+            self.client, __name__,
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        log.info("Resume improvement research complete | length=%d chars", len(result))
+        return {"resume_improvement": result, "_tokens": tokens}
+
+    async def research_salary(
+        self, company_name: str, role: str, jd_text: str,
+        search: SearchProvider,
+    ) -> dict:
+        """Research average salary for the role and location."""
+        import re
+
+        # Extract location from JD
+        city, country = "", "USA"
+        loc_match = re.search(
+            r'(?:Location|Location:|Based in|City|Office)\s*[:\-]?\s*(.+?)(?:\n|$|,|\.)',
+            jd_text, re.IGNORECASE,
+        )
+        if loc_match:
+            loc = loc_match.group(1).strip()
+            parts = [p.strip() for p in loc.split(",")]
+            if parts:
+                city = parts[0]
+            if len(parts) > 1:
+                country = parts[-1]
+            log.info("Location extracted from JD | city='%s' | country='%s'", city, country)
+
+        location_query = f"{city} {country}".strip()
+        log.info("Researching salary | role='%s' | location='%s'", role, location_query)
+
+        salary_search, range_search = await asyncio.gather(
+            search.search(f"{role} average salary {location_query} 2025 per annum", max_results=4),
+            search.search(f"{company_name} {role} salary range compensation", max_results=3),
+        )
+
+        snippets = "\n".join(
+            f"- {r['title']}: {r['snippet']}"
+            for r in (salary_search + range_search) if r.get("snippet")
+        )[:2500]
+
+        prompt = f"""Synthesise salary research for the candidate.
+
+## Role
+{role} at {company_name}
+
+## Location
+{city}, {country}
+
+## Web Research
+{snippets}
+
+Provide:
+1. **Average Salary** (annual, in local currency or USD)
+2. **Salary Range** (low to high, percentile if available)
+3. **Monthly Equivalent** (if annual data available)
+4. **Factors**: Elements that affect salary (experience level, certifications, etc.)
+5. **Negotiation Leverage**: What the candidate can highlight to negotiate higher
+
+Keep it concise and data-backed. If specific data is limited, note this and provide general market context."""
+
+        model       = settings.researcher_salary_model
+        max_tokens  = settings.researcher_salary_max_tokens
+        temperature = settings.researcher_salary_temperature
+        result, tokens = await llm_call(
+            self.client, __name__,
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        log.info("Salary research complete | length=%d chars | location=%s",
+                 len(result), location_query)
+        return {
+            "salary_analysis": result,
+            "location": location_query,
+            "_tokens": tokens,
+        }
+
     async def close(self):
         log.debug("Closing ResearchAgent HTTP client")
         await self.http_client.aclose()
