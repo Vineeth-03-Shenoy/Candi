@@ -75,7 +75,8 @@ class ResearchAgent:
     # Web research
     # ------------------------------------------------------------------
 
-    async def research_company(self, company_name: str, role: str, search: SearchProvider) -> dict:
+    async def research_company(self, company_name: str, role: str, search: SearchProvider, client=None) -> dict:
+        _client = client or self.client
         log.info("Starting company research | company='%s' | role='%s' | provider=%s",
                  company_name, role, search.name)
 
@@ -144,7 +145,7 @@ Clearly note if specific data was limited."""
         temperature = settings.researcher_company_temperature
         log.debug("Calling %s to synthesise company research", model)
         summary, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -292,7 +293,8 @@ Clearly note if specific data was limited."""
     # Resume / JD analysis
     # ------------------------------------------------------------------
 
-    async def extract_jd_info(self, jd_text: str) -> dict:
+    async def extract_jd_info(self, jd_text: str, client=None) -> dict:
+        _client = client or self.client
         log.info("Extracting JD info | jd_length=%d chars", len(jd_text))
 
         prompt = f"""Extract the structured fields from this job description.
@@ -331,7 +333,8 @@ Job Description:
             "_tokens":     tokens,
         }
 
-    async def extract_resume_info(self, resume_text: str) -> dict:
+    async def extract_resume_info(self, resume_text: str, client=None) -> dict:
+        _client = client or self.client
         log.info("Extracting resume info | resume_length=%d chars", len(resume_text))
 
         prompt = f"""Extract the structured fields from this resume.
@@ -347,7 +350,7 @@ Resume:
         # This call intentionally receives the full unmasked resume (needed to
         # extract the candidate name) — withhold it from the JSONL log.
         info, tokens = await llm_parse(
-            self.client, __name__,
+            _client, __name__,
             response_format=ResumeInfo,
             pii_masked=False,
             model=model,
@@ -375,8 +378,9 @@ Resume:
 
     async def research_resume_improvement(
         self, jd_text: str, resume_text: str, company_name: str, role: str,
-        search: SearchProvider,
+        search: SearchProvider, client=None,
     ) -> dict:
+        _client = client or self.client
         """Search for resume best practices + market standards, then synthesise improvement tips."""
         log.info("Researching resume improvement | company='%s' | role='%s'", company_name, role)
 
@@ -414,7 +418,7 @@ Be specific and actionable — reference actual JD requirements and the candidat
         max_tokens  = settings.researcher_resume_improve_max_tokens
         temperature = settings.researcher_resume_improve_temperature
         result, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -425,15 +429,16 @@ Be specific and actionable — reference actual JD requirements and the candidat
 
     async def research_salary(
         self, company_name: str, role: str, jd_text: str,
-        search: SearchProvider,
+        search: SearchProvider, client=None,
     ) -> dict:
+        _client = client or self.client
         """Research average salary for the role and location."""
         import re
 
         # Extract location from JD
         city, country = "", "USA"
         loc_match = re.search(
-            r'(?:Location|Location:|Based in|City|Office)\s*[:\-]?\s*(.+?)(?:\n|$|,|\.)',
+            r'(?:Location|Based\sin|City|Office)\s*[:\-]*\s*(.+?)(?:\n|$|\.\s|•|\|)',
             jd_text, re.IGNORECASE,
         )
         if loc_match:
@@ -482,7 +487,7 @@ Keep it concise and data-backed. If specific data is limited, note this and prov
         max_tokens  = settings.researcher_salary_max_tokens
         temperature = settings.researcher_salary_temperature
         result, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,

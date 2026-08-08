@@ -185,6 +185,7 @@ export default function Home() {
           jd_text:         jdContent,
           session_id:      sessionIdRef.current,
           search_provider: searchProvider,
+          llm_provider:    llmProvider,
         }),
       });
 

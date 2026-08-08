@@ -81,7 +81,9 @@ class ContentGenAgent:
         resume_analysis: dict,
         company_research: dict | None = None,
         interview_experiences: list[dict] | None = None,
+        client=None,
     ) -> dict:
+        _client = client or self.client
         log.info(
             "Generating questions for round | has_research=%s | has_experiences=%s",
             bool(company_research), bool(interview_experiences),
@@ -115,7 +117,7 @@ Generate 5-8 questions relevant to this round type."""
         temperature = settings.content_round_questions_temperature
         log.debug("Calling %s for round question generation", model)
         result, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -131,7 +133,9 @@ Generate 5-8 questions relevant to this round type."""
         resume_analysis: dict,
         company_research: dict | None = None,
         interview_experiences: list[dict] | None = None,
+        client=None,
     ) -> dict:
+        _client = client or self.client
         log.info(
             "Generating all questions | rounds=%s | has_research=%s | has_experiences=%s",
             rounds.get("estimated_rounds"), bool(company_research), bool(interview_experiences),
@@ -164,7 +168,7 @@ Instructions:
         temperature = settings.content_all_questions_temperature
         log.debug("Calling %s for comprehensive question generation", model)
         result, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -178,7 +182,9 @@ Instructions:
         resume_analysis: dict,
         interview_experiences: list[dict] | None = None,
         company_research: dict | None = None,
+        client=None,
     ) -> dict:
+        _client = client or self.client
         log.info(
             "Generating behavioral questions | has_research=%s | has_experiences=%s",
             bool(company_research), bool(interview_experiences),
@@ -205,7 +211,7 @@ Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Le
         temperature = settings.content_behavioral_temperature
         log.debug("Calling %s for behavioral question generation", model)
         result, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -219,7 +225,9 @@ Focus on: Leadership, Conflict Resolution, Problem Solving, Teamwork, Failure/Le
         jd_analysis: dict,
         resume_analysis: dict,
         technical_qa: dict[str, str] | None = None,
+        client=None,
     ) -> dict:
+        _client = client or self.client
         log.info(
             "Generating technical deep dives | skills_with_data=%d",
             len(technical_qa) if technical_qa else 0,
@@ -250,7 +258,7 @@ Instructions:
         temperature = settings.content_technical_temperature
         log.debug("Calling %s for technical deep dive generation", model)
         result, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,

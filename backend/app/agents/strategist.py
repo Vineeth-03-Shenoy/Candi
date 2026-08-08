@@ -16,7 +16,8 @@ class StrategistAgent:
         log.debug("Initialising StrategistAgent")
         self.client = create_llm_client()
 
-    async def identify_rounds(self, jd_analysis: dict, company_research: dict) -> dict:
+    async def identify_rounds(self, jd_analysis: dict, company_research: dict, client=None) -> dict:
+        _client = client or self.client
         company = company_research.get("company_name", "the company")
         role    = company_research.get("role", "the role")
         log.info("Identifying interview rounds | company='%s' | role='%s'", company, role)
@@ -44,7 +45,7 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         temperature = settings.strategist_rounds_temperature
         log.debug("Calling %s to identify interview rounds", model)
         rounds_text, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -75,8 +76,9 @@ Return 4-6 likely rounds in order. Be specific to the role and company."""
         return count
 
     async def analyze_role_seniority(
-        self, resume_analysis: dict, jd_analysis: dict
+        self, resume_analysis: dict, jd_analysis: dict, client=None
     ) -> dict:
+        _client = client or self.client
         log.info("Analysing role seniority")
 
         context = (
@@ -102,7 +104,7 @@ Be practical and actionable."""
         temperature = settings.strategist_seniority_temperature
         log.debug("Calling %s for seniority analysis", model)
         analysis_text, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -126,7 +128,9 @@ Be practical and actionable."""
         rounds: dict,
         resume_analysis: dict,
         jd_analysis: dict,
+        client=None,
     ) -> dict:
+        _client = client or self.client
         log.info(
             "Generating preparation strategy | estimated_rounds=%s",
             rounds.get("estimated_rounds"),
@@ -157,7 +161,7 @@ Be specific and actionable for THIS candidate and THIS role."""
         temperature = settings.strategist_strategy_temperature
         log.debug("Calling %s to generate preparation strategy", model)
         strategy_text, tokens = await llm_call(
-            self.client, __name__,
+            _client, __name__,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
