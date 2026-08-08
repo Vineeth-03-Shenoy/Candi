@@ -24,6 +24,7 @@ interface SessionSidebarProps {
   onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
   onClose: () => void;
+  refreshKey?: number;
 }
 
 function loadWidth(): number {
@@ -46,6 +47,7 @@ export function SessionSidebar({
   onSelectSession,
   onNewSession,
   onClose,
+  refreshKey = 0,
 }: SessionSidebarProps) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [widthPct, setWidthPct] = useState(loadWidth);
@@ -61,7 +63,7 @@ export function SessionSidebar({
     } catch {}
   };
 
-  useEffect(() => { loadSessions(); }, [activeSessionId]);
+  useEffect(() => { loadSessions(); }, [activeSessionId, refreshKey]);
 
   const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();

@@ -320,8 +320,12 @@ async def generate_prep_events(
     session.setdefault("token_usage", _blank_tokens())
 
     try:
+        # Start a user message to record this prep in session history
+        session["messages"].append({"role": "user", "content": "Prepare interview guide for this role"})
+
         # ── Step 1: Resume analysis (full text — needed to extract candidate name) ──
         log.info("Pipeline step 1/10 — resume analysis | session_id='%s'", session_id)
+        yield f"data: {json.dumps({'step': 1, 'status': 'active', 'message': 'Analyzing your resume...'})}\n\n"
         yield f"data: {json.dumps({'step': 1, 'status': 'active', 'message': 'Analyzing your resume...'})}\n\n"
         resume_analysis = await researcher.extract_resume_info(resume_text, client=prep_client)
         _add_tokens(session, resume_analysis.get("_tokens"))
@@ -489,6 +493,7 @@ async def generate_prep_events(
                 "seniority":       seniority,
             }
             session["pdf_path"] = pdf_path
+            session["messages"].append({"role": "assistant", "content": f"**Preliminary Analysis Ready**\n\nBased on our analysis, this role may be out of reach right now. I've prepared a short guide with your profile review, job requirements, resume improvement suggestions, and salary expectations. Review these, strengthen your profile, and run the full preparation when ready."})
             session_store.save(session_id, session)
 
             yield f"data: {json.dumps({'step': 'complete', 'summary': f'**Preliminary Analysis Ready**\\n\\nBased on our analysis, this role may be out of reach right now. I have prepared a short guide with:\\n- Your profile review\\n- Job requirements\\n- Resume improvement suggestions\\n- Salary expectations\\n\\nReview these, strengthen your profile, and run the full preparation when ready.', 'pdf_path': pdf_path, 'token_usage': session['token_usage']})}\n\n"
@@ -601,6 +606,7 @@ async def generate_prep_events(
             "questions":          questions,
         }
         session["pdf_path"] = pdf_path
+        session["messages"].append({"role": "assistant", "content": summary})
         session_store.save(session_id, session)
 
         total_tokens = session["token_usage"]["total_tokens"]

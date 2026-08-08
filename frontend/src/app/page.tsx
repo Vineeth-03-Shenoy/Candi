@@ -98,6 +98,7 @@ export default function Home() {
   const [flashcards, setFlashcards] = useState<FlashCard[]>([]);
   const [showFlashcards, setShowFlashcards] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [sidebarRefresh, setSidebarRefresh] = useState(0);
 
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([
     { id: "1", icon: "file",      text: "Analyzing your resume...",                  status: "pending" },
@@ -212,6 +213,7 @@ export default function Home() {
                 setPdfPath(data.pdf_path);
                 addMessage("assistant", data.summary);
                 updateTokenUsage(data.token_usage);
+                setSidebarRefresh((n) => n + 1);
               } else if (typeof data.step === "number") {
                 updateThinkingStep(data.step, data.status);
               }
@@ -440,6 +442,7 @@ export default function Home() {
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onClose={() => setShowSidebar(false)}
+          refreshKey={sidebarRefresh}
         />
       )}
 
